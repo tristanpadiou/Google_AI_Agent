@@ -7,7 +7,7 @@ import os.path
 SCOPES = ["https://mail.google.com/","https://www.googleapis.com/auth/calendar"]
 
 
-def main():
+def get_creds():
   """Shows basic usage of the Gmail API.
   Lists the user's Gmail labels.
   """
@@ -31,4 +31,4 @@ def main():
       token.write(creds.to_json())
 
 if __name__ == "__main__":
-  main()
+  get_creds()
