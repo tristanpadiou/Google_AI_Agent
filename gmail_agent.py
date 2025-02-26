@@ -20,9 +20,7 @@ from dotenv import load_dotenv
 
 import os.path
 import base64
-from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from email.message import EmailMessage
@@ -192,9 +190,9 @@ def send_email(state: Annotated[dict, InjectedState],tool_call_id: Annotated[str
 @tool
 def show_inbox(state: Annotated[dict, InjectedState],tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """
-    tool to get the info and show the emails in the inbox
+    tool to get the info and show all the emails in the inbox
     args: none
-    returns: the emails in the inbox
+  
     """
      
     try:
@@ -256,57 +254,60 @@ def show_inbox(state: Annotated[dict, InjectedState],tool_call_id: Annotated[str
     
 
 @tool
-def display_email(id: str, state: Annotated[dict, InjectedState],tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
+def display_email(email_id: str, state: Annotated[dict, InjectedState],tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
 
     """
     tool to display a specific email
-    args: id - the id associated with the email to read
+    args: email_id - the id associated with the email to read
     returns: the body of the email
     """
     
     try:
-        if id in state['inbox']:
-            email=state['inbox'].get(str(id))
+        if email_id in state['inbox']:
+            email=state['inbox'].get(str(email_id))
             return Command(update={'messages': [ToolMessage(f'{email} ',tool_call_id=tool_call_id)]})
     except: 
         return Command(update={'messages': [ToolMessage(f'failed to get the email ',tool_call_id=tool_call_id)]})
     
 @tool
-def list_drafts(state: Annotated[dict, InjectedState],tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
+def list_drafts(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """
     tool to get and list all the drafts
     args: - none
     """
-    draft=service.users().drafts().list(userId='me', includeSpamTrash=False ).execute()
-    drafts={}
-    for id in draft['drafts']:
-        try:
-            d=service.users().drafts().get(userId="me", id=id['id'] , format='full' ).execute()
-            id=d['id']
-            snippet=d['message']['snippet']
-            headers={h['name']:h['value'] for h in d['message']['payload']['headers']}
-            receiver=headers['To']
-            try:
-                body=base64.urlsafe_b64decode(d['message']['payload']['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
-            except:
-                try:
-                    body=base64.urlsafe_b64decode(d['message']['payload']['parts'][0]['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
-                except:
-                    body=base64.urlsafe_b64decode(d['message']['payload']['body']['data'].encode("utf-8")).decode("utf-8")
-          
-            drafts[id]={
-                            'To':receiver,
-                            'Snippet':snippet,
-                            'draft_id':id,
-                            'body':body
-                            }
-        except:
-            drafts[id]=d
     try:
-        return Command(update={'drafts':drafts,
-            'messages': [ToolMessage(f'{drafts} ',tool_call_id=tool_call_id)]})
-    except: 
-        return Command(update={'messages': [ToolMessage(f'failed to get the drafts',tool_call_id=tool_call_id)]})
+        draft=service.users().drafts().list(userId='me', includeSpamTrash=False ).execute()
+        drafts={}
+        for id in draft['drafts']:
+            try:
+                d=service.users().drafts().get(userId="me", id=id['id'] , format='full' ).execute()
+                id=d['id']
+                snippet=d['message']['snippet']
+                headers={h['name']:h['value'] for h in d['message']['payload']['headers']}
+                receiver=headers['To']
+                try:
+                    body=base64.urlsafe_b64decode(d['message']['payload']['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
+                except:
+                    try:
+                        body=base64.urlsafe_b64decode(d['message']['payload']['parts'][0]['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
+                    except:
+                        body=base64.urlsafe_b64decode(d['message']['payload']['body']['data'].encode("utf-8")).decode("utf-8")
+            
+                drafts[id]={
+                                'To':receiver,
+                                'Snippet':snippet,
+                                'draft_id':id,
+                                'body':body
+                                }
+            except:
+                drafts[id]=d
+        try:
+            return Command(update={'drafts':drafts,
+                'messages': [ToolMessage(f'{drafts} ',tool_call_id=tool_call_id)]})
+        except: 
+            return Command(update={'messages': [ToolMessage(f'failed to get the drafts',tool_call_id=tool_call_id)]})
+    except:
+        return Command(update={'messages': [ToolMessage(f'no drafts to get',tool_call_id=tool_call_id)]})
 
 class gmail_agent:
     def __init__(self,llm: any):
