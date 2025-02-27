@@ -50,52 +50,36 @@ except HttpError as error:
 
 
 @tool
-def refresh_inbox(tool_call_id: Annotated[str, InjectedToolCallId])-> Command:
+def get_new_mail(maxResults: int ,tool_call_id: Annotated[str, InjectedToolCallId])-> Command:
 
     """
     Tool to get the latest emails
-    args: none
+    args: maxResults: int - the number of emails to return
     return: a dict structured as such {email_id:{email content}}
     """
-    ids=service.users().messages().list(userId='me', includeSpamTrash=False ).execute().get('messages',[])
+    ids=service.users().messages().list(userId='me', includeSpamTrash=False , maxResults=maxResults).execute().get('messages',[])
     messages={}
     errors=[]
     for id in ids:
+        mdata=service.users().messages().get(userId="me", id=id["id"], format='full' ).execute()
+        id=mdata.get('id')
+        thread=mdata.get('threadId')
+        label=mdata.get('labelIds')
+        headers={h.get('name'):h.get('value') for h in mdata.get('payload').get('headers')}
+        sender=headers.get('From')
+        date=headers.get('Date')
+        receiver=headers.get('To')
+        subject=headers.get('Subject')
+        snippet=mdata.get('snippet')
         try:
-            mdata=service.users().messages().get(userId="me", id=id["id"], format='full' ).execute()
-            id=mdata['id']
-            thread=mdata['threadId']
-            label=mdata['labelIds']
-            headers={h['name']:h['value'] for h in mdata['payload']['headers']}
-            sender=headers['From']
-            date=headers['Date']
-            receiver=headers['To']
-            subject=headers['Subject']
-            snippet=mdata['snippet']
             body=base64.urlsafe_b64decode(mdata['payload']['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
         except:
             try:
-                id=mdata['id']
-                thread=mdata['threadId']
-                label=mdata['labelIds']
-                headers={h['name']:h['value'] for h in mdata['payload']['headers']}
-                sender=headers['From']
-                date=headers['Date']
-                receiver=headers['To']
-                subject=headers['Subject']
-                snippet=mdata['snippet']
+
                 body=base64.urlsafe_b64decode(mdata['payload']['parts'][0]['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
             except:
                 try: 
-                    id=mdata['id']
-                    thread=mdata['threadId']
-                    label=mdata['labelIds']
-                    headers={h['name']:h['value'] for h in mdata['payload']['headers']}
-                    sender=headers['From']
-                    date=headers['Date']
-                    receiver=headers['To']
-                    subject=headers['Subject']
-                    snippet=mdata['snippet']
+
                     body=base64.urlsafe_b64decode(mdata['payload']['body']['data'].encode("utf-8")).decode("utf-8")
                 except:
                     errors.append(mdata)
@@ -110,7 +94,8 @@ def refresh_inbox(tool_call_id: Annotated[str, InjectedToolCallId])-> Command:
                     'body':body
                     }  
     return Command(update={'inbox':messages,
-                'messages': [ToolMessage(f'Successfully collected the mail',tool_call_id=tool_call_id)]})
+                'messages': [ToolMessage(f'Successfully collected the mail, display them',tool_call_id=tool_call_id)]})
+
 @tool
 def create_email(receiver: str, content: str, email_subject:str, tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """
@@ -120,60 +105,32 @@ def create_email(receiver: str, content: str, email_subject:str, tool_call_id: A
           content - the body of the email
           email_subject - the subject of the email
     """
-    try:
-        message = EmailMessage()
+ 
+    message = EmailMessage()
 
-        message.set_content(content)
+    message.set_content(content)
 
-        message["To"] = receiver
-        message["From"] = "me"
-        message["Subject"] = email_subject
+    message["To"] = receiver
+    message["From"] = "me"
+    message["Subject"] = email_subject
 
-        # encoded message
-        encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
-
-        create_message = {"message": {"raw": encoded_message}}
-        # pylint: disable=E1101
-        draft = (
-            service.users()
-            .drafts()
-            .create(userId="me", body=create_message)
-            .execute()
-        )
-
-        current_draft={}
-        d=service.users().drafts().get(userId="me", id=draft['id'] , format='full' ).execute()
-        current_draft['id']=d['id']
-        current_draft['snippet']=d['message']['snippet']
-        headers={h['name']:h['value'] for h in d['message']['payload']['headers']}
-        current_draft['To']=headers['To']
-        try:
-            current_draft['body']=base64.urlsafe_b64decode(d['message']['payload']['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
-        except:
-            try:
-                current_draft['body']=base64.urlsafe_b64decode(d['message']['payload']['parts'][0]['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
-            except:
-                current_draft['body']=base64.urlsafe_b64decode(d['message']['payload']['body']['data'].encode("utf-8")).decode("utf-8")
-        
-        return Command(update={'current_draft':current_draft,
-                'messages': [ToolMessage(f'successfully created a draft ',tool_call_id=tool_call_id)]})
-    except:
-        return Command(update={'current_draft':draft,
-            'messages': [ToolMessage(f'created draft but failed to make it more readable ',tool_call_id=tool_call_id)]})
+    # encoded message
+    encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
     
+    create_message = {"raw": encoded_message}
+    return Command(update={'current_draft':create_message,
+            'messages': [ToolMessage(f'display this as is: {message}, always show the email address the email is sent to and ask if it should be sent.',tool_call_id=tool_call_id)]})
 
 @tool
-def show_current_draft(state: Annotated[dict, InjectedState], tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
-    """
-    tool to get the info and show the current_draft
-    args: none
-    returns: the current draft
-    """
-    try:
-        return Command(update={'messages': [ToolMessage(f'{state['current_draft']} ',tool_call_id=tool_call_id)]})
-    except: 
-        return Command(update={'messages': [ToolMessage(f'failed to get the current draft ',tool_call_id=tool_call_id)]})
+def verify_draft(state: Annotated[dict, InjectedState],tool_call_id: Annotated[str, InjectedToolCallId]):
+    """tool to verify the current draft
     
+    args: none
+    """
+    create_message=state['current_draft']
+    decoded=base64.urlsafe_b64decode(create_message.get('message').get('raw').encode("utf-8")).decode("utf-8")
+    return Command(update={'messages':[ToolMessage(f'display this draft: {decoded} and ask if it should be sent.',tool_call_id=tool_call_id)]})
+
 @tool
 def send_email(state: Annotated[dict, InjectedState],tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """
@@ -181,140 +138,99 @@ def send_email(state: Annotated[dict, InjectedState],tool_call_id: Annotated[str
     args: - none
     """
     try:
-        draft=service.users().drafts().get(userId="me", id=state['current_draft']['id'] , format='full' ).execute()
-        service.users().drafts().send(userId='me',body=draft).execute()
+        create_message=state['current_draft']
+        # pylint: disable=E1101
+        send_message = (
+            service.users()
+            .messages()
+            .send(userId="me", body=create_message)
+            .execute()
+        )
         return Command(update={'messages': [ToolMessage(f'email sent! ',tool_call_id=tool_call_id)]})
     except:
         return Command(update={'messages': [ToolMessage(f'failed to send draft ',tool_call_id=tool_call_id)]})
-    
+
 @tool
 def show_inbox(state: Annotated[dict, InjectedState],tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """
-    tool to get the info and show all the emails in the inbox
+    tool to get the info and show the emails in the inbox
     args: none
-  
+    returns: the emails in the inbox
     """
      
     try:
-        return Command(update={'messages': [ToolMessage(f'{state['inbox']} ',tool_call_id=tool_call_id)]})
+        return state['inbox']
     except: 
-            ids=service.users().messages().list(userId='me', includeSpamTrash=False ).execute().get('messages',[])
-            messages={}
-            for id in ids:
+        ids=service.users().messages().list(userId='me', includeSpamTrash=False, maxResults=10 ).execute().get('messages',[])
+        messages={}
+        errors=[]
+        for id in ids:
+            mdata=service.users().messages().get(userId="me", id=id["id"], format='full' ).execute()
+            id=mdata.get('id')
+            thread=mdata.get('threadId')
+            label=mdata.get('labelIds')
+            headers={h.get('name'):h.get('value') for h in mdata.get('payload').get('headers')}
+            sender=headers.get('From')
+            date=headers.get('Date')
+            receiver=headers.get('To')
+            subject=headers.get('Subject')
+            snippet=mdata.get('snippet')
+            try:
+                body=base64.urlsafe_b64decode(mdata['payload']['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
+            except:
                 try:
-                    mdata=service.users().messages().get(userId="me", id=id["id"], format='full' ).execute()
-                    id=mdata['id']
-                    thread=mdata['threadId']
-                    label=mdata['labelIds']
-                    headers={h['name']:h['value'] for h in mdata['payload']['headers']}
-                    sender=headers['From']
-                    date=headers['Date']
-                    receiver=headers['To']
-                    subject=headers['Subject']
-                    snippet=mdata['snippet']
-                    body=base64.urlsafe_b64decode(mdata['payload']['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
+
+                    body=base64.urlsafe_b64decode(mdata['payload']['parts'][0]['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
                 except:
-                    try:
-                        id=mdata['id']
-                        thread=mdata['threadId']
-                        label=mdata['labelIds']
-                        headers={h['name']:h['value'] for h in mdata['payload']['headers']}
-                        sender=headers['From']
-                        date=headers['Date']
-                        receiver=headers['To']
-                        subject=headers['Subject']
-                        snippet=mdata['snippet']
-                        body=base64.urlsafe_b64decode(mdata['payload']['parts'][0]['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
+                    try: 
+
+                        body=base64.urlsafe_b64decode(mdata['payload']['body']['data'].encode("utf-8")).decode("utf-8")
                     except:
-                        try: 
-                            id=mdata['id']
-                            thread=mdata['threadId']
-                            label=mdata['labelIds']
-                            headers={h['name']:h['value'] for h in mdata['payload']['headers']}
-                            sender=headers['From']
-                            date=headers['Date']
-                            receiver=headers['To']
-                            subject=headers['Subject']
-                            snippet=mdata['snippet']
-                            body=base64.urlsafe_b64decode(mdata['payload']['body']['data'].encode("utf-8")).decode("utf-8")
-                        except:
-                            messages[id]=mdata
-                messages[id]={'From':sender,
-                            'To':receiver,
-                            'Date':date,
-                            'label':label,
-                            'subject':subject,
-                            'Snippet':snippet,
-                            'email_id':id,
-                            'thread':thread,
-                            'body':body
-                            }  
+                        errors.append(mdata)
+            messages[id]={'From':sender,
+                        'To':receiver,
+                        'Date':date,
+                        'label':label,
+                        'subject':subject,
+                        'Snippet':snippet,
+                        'email_id':id,
+                        'thread':thread,
+                        'body':body
+                        }   
             return Command(update={'inbox':messages,
-                        'messages': [ToolMessage(f'{messages}',tool_call_id=tool_call_id)]})
-    
+                        'messages': [ToolMessage(messages,tool_call_id=tool_call_id)]})
+
 
 @tool
-def display_email(email_id: str, state: Annotated[dict, InjectedState],tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
+def display_email(id: str, state: Annotated[dict, InjectedState],tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
 
     """
     tool to display a specific email
-    args: email_id - the id associated with the email to read
+    args: id - the id associated with the email to read
     returns: the body of the email
     """
     
     try:
-        if email_id in state['inbox']:
-            email=state['inbox'].get(str(email_id))
-            return Command(update={'messages': [ToolMessage(f'{email} ',tool_call_id=tool_call_id)]})
+        if id in state['inbox']:
+            email=state['inbox'].get(str(id))
+            return Command(update={'messages': [ToolMessage(email,tool_call_id=tool_call_id)]})
     except: 
         return Command(update={'messages': [ToolMessage(f'failed to get the email ',tool_call_id=tool_call_id)]})
-    
-@tool
-def list_drafts(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
-    """
-    tool to get and list all the drafts
-    args: - none
-    """
-    try:
-        draft=service.users().drafts().list(userId='me', includeSpamTrash=False ).execute()
-        drafts={}
-        for id in draft['drafts']:
-            try:
-                d=service.users().drafts().get(userId="me", id=id['id'] , format='full' ).execute()
-                id=d['id']
-                snippet=d['message']['snippet']
-                headers={h['name']:h['value'] for h in d['message']['payload']['headers']}
-                receiver=headers['To']
-                try:
-                    body=base64.urlsafe_b64decode(d['message']['payload']['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
-                except:
-                    try:
-                        body=base64.urlsafe_b64decode(d['message']['payload']['parts'][0]['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
-                    except:
-                        body=base64.urlsafe_b64decode(d['message']['payload']['body']['data'].encode("utf-8")).decode("utf-8")
-            
-                drafts[id]={
-                                'To':receiver,
-                                'Snippet':snippet,
-                                'draft_id':id,
-                                'body':body
-                                }
-            except:
-                drafts[id]=d
-        try:
-            return Command(update={'drafts':drafts,
-                'messages': [ToolMessage(f'{drafts} ',tool_call_id=tool_call_id)]})
-        except: 
-            return Command(update={'messages': [ToolMessage(f'failed to get the drafts',tool_call_id=tool_call_id)]})
-    except:
-        return Command(update={'messages': [ToolMessage(f'no drafts to get',tool_call_id=tool_call_id)]})
+
+
+
+
+
+
+
+
 
 class gmail_agent:
-    def __init__(self,llm: any):
+    def __init__(self,llm : any):
         self.agent=self._setup(llm)
-
+        
     def _setup(self,llm):
-        langgraph_tools=[refresh_inbox,create_email,display_email,show_inbox,show_current_draft,list_drafts,send_email]
+        langgraph_tools=[get_new_mail,create_email,display_email,show_inbox,verify_draft,send_email]
 
 
 
@@ -329,7 +245,6 @@ class gmail_agent:
             return {"messages": [llm_with_tools.invoke(state['messages'])]}
 
         graph_builder.add_node("chatbot", chatbot)
-
 
         graph_builder.add_node("tools", tool_node)
         # Any time a tool is called, we return to the chatbot to decide the next step

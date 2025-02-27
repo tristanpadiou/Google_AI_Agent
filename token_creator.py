@@ -4,7 +4,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 import os.path
 
 # If modifying these scopes, delete the file token.json.
-SCOPES = ["https://mail.google.com/","https://www.googleapis.com/auth/calendar",'https://www.googleapis.com/auth/cloud-platform']
+SCOPES = ["https://mail.google.com/","https://www.googleapis.com/auth/calendar",'https://www.googleapis.com/auth/cloud-platform','https://www.googleapis.com/auth/contacts']
 
 
 def get_creds():

@@ -49,6 +49,7 @@ except HttpError as error:
 
 
 
+# Call the Calendar API
 def get_events_node(state: State):
     now = datetime.datetime.now().isoformat() + "Z"  # 'Z' indicates UTC time
 
@@ -67,11 +68,11 @@ def get_events_node(state: State):
     ev={}
     for e in events:
         try:
-            id= e['id']
-            summary=e['summary']
-            creator=e['creator']
-            start=e["start"].get("dateTime", e["start"].get("date"))
-            end=e["end"].get("dateTime", e["end"].get("date"))
+            id= e.get('id')
+            summary=e.get('summary')
+            creator=e.get('creator')
+            start=e.get("start").get("dateTime", e.get("start").get("date"))
+            end=e.get("end").get("dateTime", e.get("end").get("date"))
             ev[start]={'summary':summary,
                     'creator':creator,
                     'start':start,
@@ -170,11 +171,11 @@ def get_calendar(state: Annotated[dict, InjectedState],tool_call_id: Annotated[s
         ev={}
         for e in events:
             try:
-                id= e['id']
-                summary=e['summary']
-                creator=e['creator']
-                start=e["start"].get("dateTime", e["start"].get("date"))
-                end=e["end"].get("dateTime", e["end"].get("date"))
+                id= e.get('id')
+                summary=e.get('summary')
+                creator=e.get('creator')
+                start=e.get("start").get("dateTime", e.get("start").get("date"))
+                end=e.get("end").get("dateTime", e.get("end").get("date"))
                 ev[start]={'summary':summary,
                         'creator':creator,
                         'start':start,
@@ -209,11 +210,11 @@ def update_calendar(tool_call_id: Annotated[str, InjectedToolCallId]):
     ev={}
     for e in events:
         try:
-            id= e['id']
-            summary=e['summary']
-            creator=e['creator']
-            start=e["start"].get("dateTime", e["start"].get("date"))
-            end=e["end"].get("dateTime", e["end"].get("date"))
+            id= e.get('id')
+            summary=e.get('summary')
+            creator=e.get('creator')
+            start=e.get("start").get("dateTime", e.get("start").get("date"))
+            end=e.get("end").get("dateTime", e.get("end").get("date"))
             ev[start]={'summary':summary,
                     'creator':creator,
                     'start':start,
