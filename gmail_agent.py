@@ -94,7 +94,7 @@ def get_new_mail(maxResults: int ,tool_call_id: Annotated[str, InjectedToolCallI
                     'body':body
                     }  
     return Command(update={'inbox':messages,
-                'messages': [ToolMessage(f'Successfully collected the mail, display them',tool_call_id=tool_call_id)]})
+                'messages': [ToolMessage(messages,tool_call_id=tool_call_id)]})
 
 @tool
 def create_email(receiver: str, content: str, email_subject:str, tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
@@ -153,7 +153,7 @@ def send_email(state: Annotated[dict, InjectedState],tool_call_id: Annotated[str
 @tool
 def show_inbox(state: Annotated[dict, InjectedState],tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """
-    tool to get the info and show the emails in the inbox
+    tool to get the info and show the emails in the inbox do not use this tool to collect new mail
     args: none
     returns: the emails in the inbox
     """
