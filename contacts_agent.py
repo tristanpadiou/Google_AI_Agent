@@ -9,6 +9,7 @@ from langchain_core.messages import (
 )
 from langgraph.types import Command
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.store.memory import InMemoryStore
 from langchain_core.tools.base import InjectedToolCallId
 
 from typing_extensions import TypedDict
@@ -42,7 +43,7 @@ class State(TypedDict):
     """
     messages: Annotated[list, add_messages]
 
-
+store=InMemoryStore()
 @tool
 def show_contacts(tool_call_id: Annotated[str, InjectedToolCallId])-> Command:
     """
@@ -350,7 +351,7 @@ class contacts_agent:
             tools_condition,
         )
         memory=MemorySaver()
-        graph=graph_builder.compile(checkpointer=memory)
+        graph=graph_builder.compile(checkpointer=memory, store=store)
         return graph
         
 

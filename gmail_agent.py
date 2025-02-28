@@ -8,6 +8,7 @@ from langchain_core.messages import (
 )
 from langgraph.types import Command
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.store.memory import InMemoryStore
 from langchain_core.tools.base import InjectedToolCallId
 
 from typing_extensions import TypedDict
@@ -34,7 +35,7 @@ class State(TypedDict):
     current_draft: dict
     drafts: dict
 
-
+store=InMemoryStore()
 
 
 if os.path.exists("token.json"):
@@ -99,8 +100,7 @@ def get_new_mail(maxResults: int ,tool_call_id: Annotated[str, InjectedToolCallI
 @tool
 def create_email(receiver: str, content: str, email_subject:str, tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
     """
-    Tool to create a draft of an email
-    to create an email you have to make a draft using this tool
+    Tool to create an email
     agrs: receiver - the email adress of the person to send the email to
           content - the body of the email
           email_subject - the subject of the email
@@ -119,6 +119,36 @@ def create_email(receiver: str, content: str, email_subject:str, tool_call_id: A
     
     create_message = {"raw": encoded_message}
     return Command(update={'current_draft':create_message,
+            'messages': [ToolMessage(f'display this as is: {message}, always show the email address the email is sent to and ask if it should be sent.',tool_call_id=tool_call_id)]})
+
+@tool
+def create_draft(receiver: str, content: str, email_subject:str, tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
+    """
+    Tool to create an email draft
+    agrs: receiver - the email adress of the person to send the email to
+          content - the body of the email
+          email_subject - the subject of the email
+    """
+    message = EmailMessage()
+
+    message.set_content(content)
+
+    message["To"] = receiver
+    message["From"] = "me"
+    message["Subject"] = email_subject
+
+    # encoded message
+    encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+    
+    create_message = {'messages':{"raw": encoded_message}}
+    draft = (
+        service.users()
+        .drafts()
+        .create(userId="me", body=create_message)
+        .execute()
+    )
+
+    return Command(update={
             'messages': [ToolMessage(f'display this as is: {message}, always show the email address the email is sent to and ask if it should be sent.',tool_call_id=tool_call_id)]})
 
 @tool
@@ -230,7 +260,7 @@ class gmail_agent:
         self.agent=self._setup(llm)
         
     def _setup(self,llm):
-        langgraph_tools=[get_new_mail,create_email,display_email,show_inbox,verify_draft,send_email]
+        langgraph_tools=[get_new_mail,create_email,display_email,show_inbox,verify_draft,send_email,create_draft]
 
 
 
@@ -255,7 +285,7 @@ class gmail_agent:
             tools_condition,
         )
         memory=MemorySaver()
-        graph=graph_builder.compile(checkpointer=memory)
+        graph=graph_builder.compile(checkpointer=memory, store=store)
         return graph
         
 

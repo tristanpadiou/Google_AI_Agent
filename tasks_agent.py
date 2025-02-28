@@ -1,4 +1,3 @@
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.tools import tool
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
@@ -9,6 +8,7 @@ from langchain_core.messages import (
 )
 from langgraph.types import Command
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.store.memory import InMemoryStore
 from langchain_core.tools.base import InjectedToolCallId
 
 from typing_extensions import TypedDict
@@ -32,6 +32,8 @@ class State(TypedDict):
     tasklist:dict
     task: dict
 
+store=InMemoryStore()
+
 
 if os.path.exists("token.json"):
     creds = Credentials.from_authorized_user_file("token.json")
@@ -42,14 +44,28 @@ try:
 except HttpError as error:
     print(f"An error occurred: {error}")
 
-
 @tool
-def list_tasks(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
-    """
-    Tool to list tasks in a specific tasklist, can be used to refresh tasklist and to get task ids
+def list_tasklists(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
+    """Tool to get the tasklists, can be used to refresh tasklists
+    agrs: none
     """
     try:
-        id='MDMyNDkzMjIzMzQ5ODI4MTU2MjY6MDow'
+        tasklists=service.tasklists().list(maxResults=10).execute()
+        tasklists={tasklist.get('title'):tasklist for tasklist in tasklists.get('items')}
+       
+        return Command(update={
+                            'messages':[ToolMessage(tasklists,tool_call_id=tool_call_id)]})
+    except:  
+        return Command(update={'messages':[ToolMessage('failed to get tasklists',tool_call_id=tool_call_id)]})
+
+@tool
+def list_tasks(id:str ,tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
+    """
+    Tool to list tasks in a specific tasklist, can be used to refresh tasklist and to get task ids
+    args: id - The id of the tasklist
+    """
+    try:
+        
         tasklist=service.tasks().list(tasklist=id).execute()
         tasks={task.get('title'):task for task in tasklist.get('items')}
         tasks={'id':id,
@@ -115,7 +131,7 @@ class tasks_agent:
     def __init__(self,llm : any):
         self.agent=self._setup(llm)
     def _setup(self,llm):
-        langgraph_tools=[complete_task,get_task,list_tasks, create_task]
+        langgraph_tools=[complete_task,get_task,list_tasks, create_task, list_tasklists]
 
 
 
@@ -140,7 +156,7 @@ class tasks_agent:
             tools_condition,
         )
         memory=MemorySaver()
-        graph=graph_builder.compile(checkpointer=memory)
+        graph=graph_builder.compile(checkpointer=memory, store=store)
         return graph
         
 
