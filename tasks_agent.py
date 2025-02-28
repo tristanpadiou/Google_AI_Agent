@@ -127,7 +127,7 @@ def create_task(task:dict,state: Annotated[dict, InjectedState] ,tool_call_id: A
         return Command(update={'messages':[ToolMessage(f'error :( : {task}', tool_call_id=tool_call_id)]})
 
 
-class tasks_agent:
+class Tasks_agent:
     def __init__(self,llm : any):
         self.agent=self._setup(llm)
     def _setup(self,llm):

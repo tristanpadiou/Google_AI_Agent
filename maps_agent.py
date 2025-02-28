@@ -114,7 +114,7 @@ def show_places_found(state: Annotated[dict, InjectedState],tool_call_id: Annota
         return Command(update={ 'messages':[ToolMessage(f'No places to show', tool_call_id=tool_call_id)]})
 
 
-class maps_agent:
+class Maps_agent:
     def __init__(self,llm: any):
         self.agent=self._setup(llm)
         

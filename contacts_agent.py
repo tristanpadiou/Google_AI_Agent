@@ -321,7 +321,7 @@ def update_contact(resourceName: str , body: dict , updatePersonFields: str, too
     except:
         return Command(update={'messages':[ToolMessage(f'failed to update contact',tool_call_id=tool_call_id)]})
 
-class contacts_agent:
+class Contacts_agent:
     def __init__(self,llm:any):
         self.agent=self._setup(llm)
     def _setup(self,llm):

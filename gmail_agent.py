@@ -255,7 +255,7 @@ def display_email(id: str, state: Annotated[dict, InjectedState],tool_call_id: A
 
 
 
-class gmail_agent:
+class Gmail_agent:
     def __init__(self,llm : any):
         self.agent=self._setup(llm)
         
