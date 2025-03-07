@@ -141,7 +141,7 @@ class Tasks_agent:
         llm_with_tools = llm.bind_tools(langgraph_tools)
         tool_node = ToolNode(tools=langgraph_tools)
         def chatbot(state: State):
-            """ travel assistant that answers user questions about their trip.
+            """ tasks assistant that answers user questions about their tasks.
             Depending on the request, leverage which tools to use if necessary."""
             return {"messages": [llm_with_tools.invoke(state['messages'])]}
 

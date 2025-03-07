@@ -83,6 +83,7 @@ google_image_tool=Tool(name='google_image_tool', func=google_image_search, descr
 @tool 
 def contacts_manager(query: str):
     """use this tool to answer queries about a contact or a person
+    this tool can do multiple tasks at once as long as the query mentions them:
     this tool can:
     list my contacts
     get a contact's details
@@ -97,6 +98,7 @@ def contacts_manager(query: str):
 @tool
 def tasks_manager(query:str):
     """use this tool to answer task related queries
+    this tool can do multiple tasks at once as long as the query mentions them:
     this tool can:
     list tasks
     create tasks
@@ -114,6 +116,7 @@ def tasks_manager(query:str):
 @tool
 def maps_manager(query:str):
     """tool to use to answer maps and location queries
+    this tool can do multiple tasks at once as long as the query mentions them:
     this tool can:
     find locations such as restorants, bowling alleys, museums and others
     display those locations's infos (eg. adress, name, url, price range)
@@ -126,6 +129,7 @@ def maps_manager(query:str):
 @tool
 def mail_manager(query:str):
     """Tool to use to answer any email related queries
+    this tool can do multiple tasks at once as long as the query mentions them:
     this tool can:
     get new mail
     show the inbox
@@ -143,6 +147,7 @@ def mail_manager(query:str):
 @tool
 def calendar_manager(query:str):
     """tool to use to answere any calendar or schedule related queries
+    this tool can do multiple tasks at once as long as the query mentions them:
     this tool can:
     create recuring events
     create quick events

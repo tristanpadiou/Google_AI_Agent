@@ -72,7 +72,7 @@ def show_contacts(tool_call_id: Annotated[str, InjectedToolCallId])-> Command:
                 name = names[0].get("displayName")
             contact[name]={'resourcename':resourcename,
                             'etag':etag}
-        return Command(update={'messages':[ToolMessage(contact, tool_call_id=tool_call_id)]})
+        return Command(update={'messages':[ToolMessage(f'display this:{contact}', tool_call_id=tool_call_id)]})
     except:
         return Command(update={'messages':[ToolMessage('Cannot get contacts for some reason',tool_call_id=tool_call_id)]})
     
@@ -87,7 +87,7 @@ def get_contact_details(resourceName: str,tool_call_id: Annotated[str, InjectedT
         results=service.people().get(resourceName=resourceName,personFields='names,addresses,phoneNumbers,birthdays,biographies,emailAddresses').execute()
 
 
-        return Command(update={'messages':[ToolMessage(results, tool_call_id=tool_call_id)]})
+        return Command(update={'messages':[ToolMessage(f'display this: {results}', tool_call_id=tool_call_id)]})
     except:
         return Command(update={'messages':[ToolMessage(f'could not get the contact', tool_call_id=tool_call_id)]})
 @tool
@@ -335,7 +335,7 @@ class Contacts_agent:
         llm_with_tools = llm.bind_tools(langgraph_tools)
         tool_node = ToolNode(tools=langgraph_tools)
         def chatbot(state: State):
-            """ travel assistant that answers user questions about their trip.
+            """ contacts assistant that answers user questions about their contacts.
             Depending on the request, leverage which tools to use if necessary."""
             return {"messages": [llm_with_tools.invoke(state['messages'])]}
 
