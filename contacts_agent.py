@@ -351,7 +351,7 @@ class Contacts_agent:
             tools_condition,
         )
         memory=MemorySaver()
-        graph=graph_builder.compile(checkpointer=memory, store=store)
+        graph=graph_builder.compile(checkpointer=memory)
         return graph
         
 

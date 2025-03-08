@@ -1,22 +1,21 @@
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.tools import tool
+
+
 
 from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode, tools_condition,InjectedState
+
 from langchain_core.messages import (
     SystemMessage,
     HumanMessage,
     AIMessage,
     ToolMessage,
 )
-from langgraph.types import Command, interrupt
+
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.tools.base import InjectedToolCallId
+
 from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.prompts import PromptTemplate
+
 from typing_extensions import TypedDict
-from typing import Annotated
+
 
 #get graph visuals
 from IPython.display import Image, display
@@ -48,7 +47,7 @@ class State(TypedDict):
   A dictionnary representing the state of the agent.
   """
   query: str
-
+  node_message:str
   #location data
   latitude: str
   longitude: str
@@ -79,7 +78,7 @@ def get_current_location_node(state: State):
             'longitude':longitude,
             'address':address}
     else:
-        return 'failed'
+        return {'node_message':'failed'}
     
 def look_for_places_node(state: State):
     """
@@ -105,7 +104,7 @@ def look_for_places_node(state: State):
         return {'places':places}
                                
     except: 
-        return "failed"
+        return {'node_message':'failed'}
     
 class Maps_agent:
     def __init__(self,llm: any):
