@@ -101,7 +101,8 @@ def look_for_places_node(state: State):
                         'price_level':price_level,
                         'google_maps_url':url}
                 
-        return {'places':places}
+        return {'places':places,
+                'node_message':places}
                                
     except: 
         return {'node_message':'failed'}

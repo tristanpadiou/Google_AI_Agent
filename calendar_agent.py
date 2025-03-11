@@ -1,20 +1,12 @@
-
-from langchain.tools import tool
 from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode, tools_condition,InjectedState
-from langchain_core.messages import (
-    HumanMessage,
-    ToolMessage,
-    
-)
-from langgraph.types import Command
+
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.tools.base import InjectedToolCallId
+from pydantic import BaseModel, Field
 
-
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import PromptTemplate
+from langchain.output_parsers import RetryOutputParser
 from typing_extensions import TypedDict
-from typing import Annotated
 
 #get graph visuals
 from IPython.display import Image, display
@@ -27,16 +19,16 @@ import os
 import datetime
 import os.path
 
-from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 
 class State(TypedDict):
-    messages: Annotated[list, add_messages]
+    node_message: str
     calendar: dict
+    route: str
+    query: str
 
 if os.path.exists("token.json"):
     creds = Credentials.from_authorized_user_file("token.json")
@@ -47,9 +39,47 @@ try:
 except HttpError as error:
     print(f"An error occurred: {error}")
 
+def router(state:State):
+    route = state.get('route')
+    
+    routing_map = {
+        'show_calendar': 'to_show_calendar',
+        'create_event': 'to_create_event',
+        'quick_add_event': 'to_quick_add_event'
+    }
+    
+    return routing_map.get(route)
+
+def agent_node(state:State):
+    class Route(BaseModel):
+        route: str = Field(description="the route for the next node, either, show_calendar, create_event, quick_add_event")
+           
+            
 
 
-# Call the Calendar API
+    parser=JsonOutputParser(pydantic_object=Route)
+    prompt = PromptTemplate(
+    template="Answer the user query.\n{format_instructions}\n{query}\n",
+    input_variables=["query"],
+    partial_variables={"format_instructions": parser.get_format_instructions()},
+      )
+
+      
+    chain = prompt | llm 
+    
+    response=chain.invoke({'query':f'choose the route based on this query: {state.get('query')}'}) 
+    try:
+        response=parser.parse(response.content)
+        return {'route':response.get('route')}
+    except:
+        
+        retry_parser = RetryOutputParser.from_llm(parser=parser, llm=llm)
+
+        prompt_value = prompt.format_prompt(query=state['query'])
+        response=retry_parser.parse_with_prompt(response.content, prompt_value)
+        return {'route':response.get('route')} 
+    
+
 def get_events_node(state: State):
     now = datetime.datetime.now().isoformat() + "Z"  # 'Z' indicates UTC time
 
@@ -80,38 +110,56 @@ def get_events_node(state: State):
                         'event_id':id}
         except: ev[start]=e
 
-    return Command(update={'calendar':ev,
-                           })
+    return {'calendar':ev}
 
-@tool()
-def creating_event(tool_call_id: Annotated[str, InjectedToolCallId],summary: str, location:str, description: str, start_time: str, end_time: str, timezone:str, recurrence: str):
+def show_calendar_node(state:State):
+    return {'node_message':state.get('calendar')}
+
+def create_event_node(state: State):
     
-  """
-  Tool to create more complex events with a detailed description and optionnal recurrence.
-  args: 
-    summary: str = Field(description='the title of the event')
-    location: str = Field(description='the address or location of the event')
-    description: str = Field(description='the description of the event')
-    start_time: str = Field(description=='the start time of an event, has to be formatted as such: eg. 2015-05-28T09:00:00-07:00')
-    end_time: str = Field(description=='the end time of an event, has to be formatted as such: eg. 2015-05-28T09:00:00-07:00')
-    timezone: str = Field(description='The timezone of the event (Formatted as an IANA Time Zone Database name, e.g. "Europe/Zurich".)')
-    recurrence: str = Field(description='to defice the recurrence of the event(DAILY, WEEKLY, MONTHLY, YEARLY), follow this format eg. RRULE:FREQ=DAILY;COUNT=2')
-  If an argument is not mentionned, simply input an empty string eg. ''.
-  """
+  class Event(BaseModel):
+      summary: str = Field(description='the title of the event')
+      location: str = Field(description='the address or location of the event')
+      description: str = Field(description='the description of the event')
+      start_time: str = Field(description='the start time of an event, has to be formatted as such: eg. 2015-05-28T09:00:00-07:00')
+      end_time: str = Field(description='the end time of an event, has to be formatted as such: eg. 2015-05-28T09:00:00-07:00')
+      recurrence: str = Field(description='to define the recurrence of the event(DAILY, WEEKLY, MONTHLY, YEARLY), follow this format eg. RRULE:FREQ=DAILY;COUNT=2, if not mentionned put an empty string')
+  
+  parser=JsonOutputParser(pydantic_object=Event)
+  prompt = PromptTemplate(
+  template="Answer the user query.\n{format_instructions}\n{query}\n",
+  input_variables=["query"],
+  partial_variables={"format_instructions": parser.get_format_instructions()},
+    )
+
+    
+  chain = prompt | llm 
+  
+  response=chain.invoke({'query':f'create an event based on this query: {state.get('query')}'}) 
+  try:
+      response=parser.parse(response.content)
+     
+  except:
+      
+      retry_parser = RetryOutputParser.from_llm(parser=parser, llm=llm)
+
+      prompt_value = prompt.format_prompt(query=state['query'])
+      response=retry_parser.parse_with_prompt(response.content, prompt_value)
+      
   event = {
-  'summary': summary,
-  'location': location,
-  'description': description,
+  'summary': response.get('summary'),
+  'location': response.get('location'),
+  'description': response.get('description'),
   'start': {
-    'dateTime': start_time,
-    'timeZone': timezone,
+    'dateTime': response.get('start_time'),
+    'timeZone': response.get('timezone'),
   },
   'end': {
-    'dateTime': end_time,
-    'timeZone': timezone,
+    'dateTime': response.get('end_time'),
+    'timeZone': 'America/New_york',
   },
   'recurrence': [
-    recurrence
+    response.get('recurrence')
   ],
   'reminders': {
     'useDefault': False,
@@ -123,139 +171,203 @@ def creating_event(tool_call_id: Annotated[str, InjectedToolCallId],summary: str
 }
   try:
     event = service.events().insert(calendarId='primary', body=event).execute()
-    return Command(goto='get_events',
-                   update={'messages':[ ToolMessage('succesfully created the event', tool_call_id=tool_call_id)]})
+    return {'node_massage':'Event Created'}
   except: 
-    return Command(update={'messages':[ ToolMessage('failed to create the event', tool_call_id=tool_call_id)]})
+    return {'node_message':'Failed to create event'}
+  
+def quick_add_event_node(state:State):
+    
+    class Event(BaseModel):
+        event_description: str = Field(description="a description of the event, including the start and end time (eg. 'Appointment at Somewhere on June 3rd 10am-10:25am' )")
+           
+            
 
-@tool
-def quick_add_event(event_description:str,tool_call_id: Annotated[str, InjectedToolCallId]):
-    """
-    tool to create a quick event
-    args: event_description - a description of the event, including the start and end time (eg. 'Appointment at Somewhere on June 3rd 10am-10:25am' )
-    """
+
+    parser=JsonOutputParser(pydantic_object=Event)
+    prompt = PromptTemplate(
+    template="Answer the user query.\n{format_instructions}\n{query}\n",
+    input_variables=["query"],
+    partial_variables={"format_instructions": parser.get_format_instructions()},
+      )
+
+      
+    chain = prompt | llm 
+    
+    response=chain.invoke({'query':f'create an event based on this query: {state.get('query')}'}) 
+    try:
+        response=parser.parse(response.content)
+        
+    except:
+        
+        retry_parser = RetryOutputParser.from_llm(parser=parser, llm=llm)
+
+        prompt_value = prompt.format_prompt(query=state['query'])
+        response=retry_parser.parse_with_prompt(response.content, prompt_value)
+      
     try:
         created_event = service.events().quickAdd(
         calendarId='primary',
-        text=event_description).execute()
-        return Command(goto='get_events',
-                       update={'messages':[ ToolMessage('succesfully created the event', tool_call_id=tool_call_id)]})
+        text=response.get('event_description')).execute()
+        return {'node_massage':'Event Created'}
     except: 
-        return Command(update={'messages':[ ToolMessage('failed to create the event', tool_call_id=tool_call_id)]})
+        return {'node_message':'Failed to create event'}
     
-@tool
-def get_calendar(state: Annotated[dict, InjectedState],tool_call_id: Annotated[str, InjectedToolCallId]):
-    """
-    tool to get the calendar to answer questions
-    args: none
-    """
-
-    try:
-        calendar=state['calendar']
-        return Command(update={'messages':[ ToolMessage(str(calendar), tool_call_id=tool_call_id)]})
-    except:
-        now = datetime.datetime.now().isoformat() + "Z"  # 'Z' indicates UTC time
-
-        events_result = (
-            service.events()
-            .list(
-                calendarId="primary",
-                timeMin=now,
-                maxResults=20,
-                singleEvents=True,
-                orderBy="startTime",
-            )
-            .execute()
-        )
-        events = events_result.get("items", [])
-        ev={}
-        for e in events:
-            try:
-                id= e.get('id')
-                summary=e.get('summary')
-                creator=e.get('creator')
-                start=e.get("start").get("dateTime", e.get("start").get("date"))
-                end=e.get("end").get("dateTime", e.get("end").get("date"))
-                ev[start]={'summary':summary,
-                        'creator':creator,
-                        'start':start,
-                        'end':end,
-                            'event_id':id}
-            except:
-                    ev[start]=e
-
-        return Command(update={'calendar':ev,
-             'messages':[ToolMessage(str(ev), tool_call_id=tool_call_id)]})
-    
-@tool
-def update_calendar(tool_call_id: Annotated[str, InjectedToolCallId]):
-    """
-    tool to return the latest version of the calendar
-    agrs: none
-    """
-    now = datetime.datetime.now().isoformat() + "Z"  # 'Z' indicates UTC time
-
-    events_result = (
-        service.events()
-        .list(
-            calendarId="primary",
-            timeMin=now,
-            maxResults=20,
-            singleEvents=True,
-            orderBy="startTime",
-        )
-        .execute()
-    )
-    events = events_result.get("items", [])
-    ev={}
-    for e in events:
-        try:
-            id= e.get('id')
-            summary=e.get('summary')
-            creator=e.get('creator')
-            start=e.get("start").get("dateTime", e.get("start").get("date"))
-            end=e.get("end").get("dateTime", e.get("end").get("date"))
-            ev[start]={'summary':summary,
-                    'creator':creator,
-                    'start':start,
-                    'end':end,
-                        'event_id':id}
-        except:
-                ev[start]=e
-
-    return Command(update={'calendar':ev,
-        'messages':[ToolMessage('updated calendar', tool_call_id=tool_call_id)]})
 
 class Calendar_agent:
-    def __init__(self,llm:any):
+    def __init__(self,llm: any):
         self.agent=self._setup(llm)
     def _setup(self,llm):
-   
-        langgraph_tools=[quick_add_event,get_calendar,creating_event,update_calendar]
+        def agent_node(state:State):
+            class Route(BaseModel):
+                route: str = Field(description="the route for the next node, either, show_calendar, create_event, quick_add_event")
+                
+                    
 
+
+            parser=JsonOutputParser(pydantic_object=Route)
+            prompt = PromptTemplate(
+            template="Answer the user query.\n{format_instructions}\n{query}\n",
+            input_variables=["query"],
+            partial_variables={"format_instructions": parser.get_format_instructions()},
+            )
+
+            
+            chain = prompt | llm 
+            
+            response=chain.invoke({'query':f'choose the route based on this query: {state.get('query')}'}) 
+            try:
+                response=parser.parse(response.content)
+                return {'route':response.get('route')}
+            except:
+                
+                retry_parser = RetryOutputParser.from_llm(parser=parser, llm=llm)
+
+                prompt_value = prompt.format_prompt(query=state['query'])
+                response=retry_parser.parse_with_prompt(response.content, prompt_value)
+                return {'route':response.get('route')} 
+     
+        def create_event_node(state: State):
+    
+            class Event(BaseModel):
+                summary: str = Field(description='the title of the event')
+                location: str = Field(description='the address or location of the event')
+                description: str = Field(description='the description of the event')
+                start_time: str = Field(description='the start time of an event, has to be formatted as such: eg. 2015-05-28T09:00:00-07:00')
+                end_time: str = Field(description='the end time of an event, has to be formatted as such: eg. 2015-05-28T09:00:00-07:00')
+                recurrence: str = Field(description='to define the recurrence of the event(DAILY, WEEKLY, MONTHLY, YEARLY), follow this format eg. RRULE:FREQ=DAILY;COUNT=2, if not mentionned put an empty string')
+            
+            parser=JsonOutputParser(pydantic_object=Event)
+            prompt = PromptTemplate(
+            template="Answer the user query.\n{format_instructions}\n{query}\n",
+            input_variables=["query"],
+            partial_variables={"format_instructions": parser.get_format_instructions()},
+                )
+
+                
+            chain = prompt | llm 
+            
+            response=chain.invoke({'query':f'create an event based on this query: {state.get('query')}'}) 
+            try:
+                response=parser.parse(response.content)
+                
+            except:
+                
+                retry_parser = RetryOutputParser.from_llm(parser=parser, llm=llm)
+
+                prompt_value = prompt.format_prompt(query=state['query'])
+                response=retry_parser.parse_with_prompt(response.content, prompt_value)
+                
+            event = {
+            'summary': response.get('summary'),
+            'location': response.get('location'),
+            'description': response.get('description'),
+            'start': {
+                'dateTime': response.get('start_time'),
+                'timeZone': response.get('timezone'),
+            },
+            'end': {
+                'dateTime': response.get('end_time'),
+                'timeZone': 'America/New_york',
+            },
+            'recurrence': [
+                response.get('recurrence')
+            ],
+            'reminders': {
+                'useDefault': False,
+                'overrides': [
+                {'method': 'email', 'minutes': 24 * 60},
+                {'method': 'popup', 'minutes': 10},
+                ],
+            },
+            }
+            try:
+                event = service.events().insert(calendarId='primary', body=event).execute()
+                return {'node_massage':'Event Created'}
+            except: 
+                return {'node_message':'Failed to create event'}
+            
+        def quick_add_event_node(state:State):
+    
+            class Event(BaseModel):
+                event_description: str = Field(description="a description of the event, including the start and end time (eg. 'Appointment at Somewhere on June 3rd 10am-10:25am' )")
+                
+                    
+
+
+            parser=JsonOutputParser(pydantic_object=Event)
+            prompt = PromptTemplate(
+            template="Answer the user query.\n{format_instructions}\n{query}\n",
+            input_variables=["query"],
+            partial_variables={"format_instructions": parser.get_format_instructions()},
+            )
+
+            
+            chain = prompt | llm 
+            
+            response=chain.invoke({'query':f'create an event based on this query: {state.get('query')}'}) 
+            try:
+                response=parser.parse(response.content)
+                
+            except:
+                
+                retry_parser = RetryOutputParser.from_llm(parser=parser, llm=llm)
+
+                prompt_value = prompt.format_prompt(query=state['query'])
+                response=retry_parser.parse_with_prompt(response.content, prompt_value)
+            
+            try:
+                created_event = service.events().quickAdd(
+                calendarId='primary',
+                text=response.get('event_description')).execute()
+                return {'node_massage':'Event Created'}
+            except: 
+                return {'node_message':'Failed to create event'}
 
 
         graph_builder = StateGraph(State)
 
         # Modification: tell the LLM which tools it can call
-        llm_with_tools = llm.bind_tools(langgraph_tools)
-        tool_node = ToolNode(tools=langgraph_tools)
-        def chatbot(state: State):
-            """ calendar assistant that answers user questions about their calendar.
-            Depending on the request, leverage which tools to use if necessary."""
-            return {"messages": [llm_with_tools.invoke(state['messages'])]}
 
-        graph_builder.add_node("chatbot", chatbot)
+        graph_builder.add_node("agent", agent_node)
 
         graph_builder.add_node('get_events',get_events_node)
-        graph_builder.add_node("tools", tool_node)
+        graph_builder.add_node("show_calendar", show_calendar_node)
+        graph_builder.add_node('create_event', create_event_node)
+        graph_builder.add_node('quick_add_event', quick_add_event_node)
         # Any time a tool is called, we return to the chatbot to decide the next step
-        graph_builder.add_edge(START,'chatbot')
-        graph_builder.add_edge("tools", "chatbot")
+        graph_builder.add_edge(START,'get_events')
+        graph_builder.add_edge("get_events", "agent")
         graph_builder.add_conditional_edges(
-            "chatbot",
-            tools_condition,
+            "agent",
+            router,{
+                'to_show_calendar': 'show_calendar',
+                'to_create_event': 'create_event',
+                'to_quick_add_event': 'quick_add_event'
+            }
         )
+        graph_builder.add_edge("show_calendar", END)
+        graph_builder.add_edge('create_event', END)
+        graph_builder.add_edge('quick_add_event',END)
         memory=MemorySaver()
         graph=graph_builder.compile(checkpointer=memory)
         return graph
@@ -269,16 +381,17 @@ class Calendar_agent:
                                 )
                             )
                         )
-    def stream(self,input:str):
-        config = {"configurable": {"thread_id": "1"}}
-        input_message = HumanMessage(content=input)
-        for event in self.agent.stream({"messages": [input_message]}, config, stream_mode="values"):
-            event["messages"][-1].pretty_print()
-
     def chat(self,input:str):
         config = {"configurable": {"thread_id": "1"}}
-        response=self.agent.invoke({'messages':HumanMessage(content=str(input))},config)
-        return response['messages'][-1].content
+        response=self.agent.invoke({'query':input
+                                    },config)
+        return response
+
+    def stream(self,input:str):
+        config = {"configurable": {"thread_id": "1"}}
+        for event in self.agent.stream({'query':input
+                                        }, config, stream_mode="updates"):
+            print(event)
     
     def get_state(self, state_val:str):
         config = {"configurable": {"thread_id": "1"}}

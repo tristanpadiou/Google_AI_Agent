@@ -148,7 +148,7 @@ def update_contacts_list_node(state: State):
 def show_contacts_node(state:State):
     contacts=state['contacts']
 
-    return  {'contacts':contacts}
+    return  {'node_message':contacts}
 
 class Contacts_agent:
     def __init__(self,llm:any):
@@ -182,7 +182,8 @@ class Contacts_agent:
                         response=retry_parser.parse_with_prompt(response.content, prompt_value) 
                 
                         results=service.people().get(resourceName=response['resourcename'],personFields='names,addresses,phoneNumbers,birthdays,biographies,emailAddresses').execute()
-                        return {'contact_details':results}
+                        return {'contact_details':results,
+                                'node_message':results}
                     except:
                         return {'node_message':'failed'}
             except:
