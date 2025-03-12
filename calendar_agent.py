@@ -50,35 +50,7 @@ def router(state:State):
     
     return routing_map.get(route)
 
-def agent_node(state:State):
-    class Route(BaseModel):
-        route: str = Field(description="the route for the next node, either, show_calendar, create_event, quick_add_event")
-           
-            
-
-
-    parser=JsonOutputParser(pydantic_object=Route)
-    prompt = PromptTemplate(
-    template="Answer the user query.\n{format_instructions}\n{query}\n",
-    input_variables=["query"],
-    partial_variables={"format_instructions": parser.get_format_instructions()},
-      )
-
-      
-    chain = prompt | llm 
-    
-    response=chain.invoke({'query':f'choose the route based on this query: {state.get('query')}'}) 
-    try:
-        response=parser.parse(response.content)
-        return {'route':response.get('route')}
-    except:
-        
-        retry_parser = RetryOutputParser.from_llm(parser=parser, llm=llm)
-
-        prompt_value = prompt.format_prompt(query=state['query'])
-        response=retry_parser.parse_with_prompt(response.content, prompt_value)
-        return {'route':response.get('route')} 
-    
+ 
 
 def get_events_node(state: State):
     now = datetime.datetime.now().isoformat() + "Z"  # 'Z' indicates UTC time
@@ -115,102 +87,7 @@ def get_events_node(state: State):
 def show_calendar_node(state:State):
     return {'node_message':state.get('calendar')}
 
-def create_event_node(state: State):
-    
-  class Event(BaseModel):
-      summary: str = Field(description='the title of the event')
-      location: str = Field(description='the address or location of the event')
-      description: str = Field(description='the description of the event')
-      start_time: str = Field(description='the start time of an event, has to be formatted as such: eg. 2015-05-28T09:00:00-07:00')
-      end_time: str = Field(description='the end time of an event, has to be formatted as such: eg. 2015-05-28T09:00:00-07:00')
-      recurrence: str = Field(description='to define the recurrence of the event(DAILY, WEEKLY, MONTHLY, YEARLY), follow this format eg. RRULE:FREQ=DAILY;COUNT=2, if not mentionned put an empty string')
-  
-  parser=JsonOutputParser(pydantic_object=Event)
-  prompt = PromptTemplate(
-  template="Answer the user query.\n{format_instructions}\n{query}\n",
-  input_variables=["query"],
-  partial_variables={"format_instructions": parser.get_format_instructions()},
-    )
 
-    
-  chain = prompt | llm 
-  
-  response=chain.invoke({'query':f'create an event based on this query: {state.get('query')}'}) 
-  try:
-      response=parser.parse(response.content)
-     
-  except:
-      
-      retry_parser = RetryOutputParser.from_llm(parser=parser, llm=llm)
-
-      prompt_value = prompt.format_prompt(query=state['query'])
-      response=retry_parser.parse_with_prompt(response.content, prompt_value)
-      
-  event = {
-  'summary': response.get('summary'),
-  'location': response.get('location'),
-  'description': response.get('description'),
-  'start': {
-    'dateTime': response.get('start_time'),
-    'timeZone': response.get('timezone'),
-  },
-  'end': {
-    'dateTime': response.get('end_time'),
-    'timeZone': 'America/New_york',
-  },
-  'recurrence': [
-    response.get('recurrence')
-  ],
-  'reminders': {
-    'useDefault': False,
-    'overrides': [
-      {'method': 'email', 'minutes': 24 * 60},
-      {'method': 'popup', 'minutes': 10},
-    ],
-  },
-}
-  try:
-    event = service.events().insert(calendarId='primary', body=event).execute()
-    return {'node_massage':'Event Created'}
-  except: 
-    return {'node_message':'Failed to create event'}
-  
-def quick_add_event_node(state:State):
-    
-    class Event(BaseModel):
-        event_description: str = Field(description="a description of the event, including the start and end time (eg. 'Appointment at Somewhere on June 3rd 10am-10:25am' )")
-           
-            
-
-
-    parser=JsonOutputParser(pydantic_object=Event)
-    prompt = PromptTemplate(
-    template="Answer the user query.\n{format_instructions}\n{query}\n",
-    input_variables=["query"],
-    partial_variables={"format_instructions": parser.get_format_instructions()},
-      )
-
-      
-    chain = prompt | llm 
-    
-    response=chain.invoke({'query':f'create an event based on this query: {state.get('query')}'}) 
-    try:
-        response=parser.parse(response.content)
-        
-    except:
-        
-        retry_parser = RetryOutputParser.from_llm(parser=parser, llm=llm)
-
-        prompt_value = prompt.format_prompt(query=state['query'])
-        response=retry_parser.parse_with_prompt(response.content, prompt_value)
-      
-    try:
-        created_event = service.events().quickAdd(
-        calendarId='primary',
-        text=response.get('event_description')).execute()
-        return {'node_massage':'Event Created'}
-    except: 
-        return {'node_message':'Failed to create event'}
     
 
 class Calendar_agent:
