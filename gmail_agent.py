@@ -64,7 +64,7 @@ def get_new_mail_node(state: State):
     else:
         ids=service.users().messages().list(userId='me', includeSpamTrash=False , maxResults=5).execute().get('messages',[])
     messages={}
-    errors=[]
+
     for id in ids:
         mdata=service.users().messages().get(userId="me", id=id["id"], format='full' ).execute()
         id=mdata.get('id')
@@ -76,18 +76,7 @@ def get_new_mail_node(state: State):
         receiver=headers.get('To')
         subject=headers.get('Subject')
         snippet=mdata.get('snippet')
-        try:
-            body=base64.urlsafe_b64decode(mdata['payload']['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
-        except:
-            try:
 
-                body=base64.urlsafe_b64decode(mdata['payload']['parts'][0]['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
-            except:
-                try: 
-
-                    body=base64.urlsafe_b64decode(mdata['payload']['body']['data'].encode("utf-8")).decode("utf-8")
-                except:
-                    errors.append(mdata)
         messages[id]={'From':sender,
                     'To':receiver,
                     'Date':date,
@@ -95,8 +84,8 @@ def get_new_mail_node(state: State):
                     'subject':subject,
                     'Snippet':snippet,
                     'email_id':id,
-                    'thread':thread,
-                    'body':body
+                    'thread':thread
+                  
                     }  
     return {'inbox':messages}
 
@@ -162,7 +151,7 @@ class Gmail_agent:
     
         def display_email_node(state:State):
             class EmailID(BaseModel):
-                    id: str = Field(description="The ID of the Email to display")
+                id: str = Field(description="The ID of the Email to display")
 
 
             parser=JsonOutputParser(pydantic_object=EmailID)
@@ -188,9 +177,37 @@ class Gmail_agent:
 
             
             try:
-                if id in state['inbox']:
-                    email=state['inbox'].get(str(id))
-                    return {'node_message':email}
+                mdata=service.users().messages().get(userId="me", id=response.get('id'), format='full' ).execute()
+                id=mdata.get('id')
+                thread=mdata.get('threadId')
+                label=mdata.get('labelIds')
+                headers={h.get('name'):h.get('value') for h in mdata.get('payload').get('headers')}
+                sender=headers.get('From')
+                date=headers.get('Date')
+                receiver=headers.get('To')
+                subject=headers.get('Subject')
+                snippet=mdata.get('snippet')
+                try:
+                    body=base64.urlsafe_b64decode(mdata['payload']['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
+                except:
+                    try:
+
+                        body=base64.urlsafe_b64decode(mdata['payload']['parts'][0]['parts'][0]['body']['data'].encode("utf-8")).decode("utf-8")
+                    except:
+                            body=base64.urlsafe_b64decode(mdata['payload']['body']['data'].encode("utf-8")).decode("utf-8")
+                    
+                messages={'From':sender,
+                'To':receiver,
+                'Date':date,
+                'label':label,
+                'subject':subject,
+                'Snippet':snippet,
+                'email_id':id,
+                'thread':thread,
+                'body':body
+                }
+
+                return {'node_message':messages}
             except: 
                 return {'node_message':'failed'}
         
