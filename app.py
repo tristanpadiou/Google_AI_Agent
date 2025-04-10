@@ -9,7 +9,7 @@ GOOGLE_API_KEY=os.getenv('google_api_key')
 
 GEMINI_MODEL='gemini-2.0-flash'
 llm = ChatGoogleGenerativeAI(google_api_key=GOOGLE_API_KEY, model=GEMINI_MODEL, temperature=0.3)
-agent=Google_agent(llm)
+agent=Google_agent()
 
 
 def chatbot(input,history):

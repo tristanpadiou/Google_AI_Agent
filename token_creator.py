@@ -18,19 +18,34 @@ def get_creds():
     # time.
     if os.path.exists("token.json"):
       creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    
     # If there are no (valid) credentials available, let the user log in.
     if not creds or not creds.valid:
       if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        try:
+          creds.refresh(Request())
+          # Save the refreshed credentials
+          with open("token.json", "w") as token:
+            token.write(creds.to_json())
+        except Exception as e:
+          print(f"Error refreshing token: {e}")
+          # If refresh fails, we need to get new credentials
+          flow = InstalledAppFlow.from_client_secrets_file(
+              "credentials.json", SCOPES
+          )
+          creds = flow.run_local_server(port=0)
       else:
         flow = InstalledAppFlow.from_client_secrets_file(
             "credentials.json", SCOPES
         )
         creds = flow.run_local_server(port=0)
+      
       # Save the credentials for the next run
       with open("token.json", "w") as token:
         token.write(creds.to_json())
+    
     return ' token available '
       
-  except:
+  except Exception as e:
+    print(f"Error in get_creds: {e}")
     return 'something is wrong (no token)'

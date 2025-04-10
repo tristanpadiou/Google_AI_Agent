@@ -23,8 +23,40 @@ Ensure you have Python 3.7 or higher installed. Create a virtual environment and
 
 ```bash
 pip install -r requirements.txt
-
 ```
+
+## Docker Deployment
+
+The application can be deployed using Docker for easy setup and consistent environments.
+
+### Prerequisites
+- Docker installed on your system
+- `.env` file with your Google API credentials
+
+### Building the Docker Image
+
+To build the Docker image, run the following command in the project root directory:
+
+```bash
+docker build -t google-ai-agent .
+```
+
+### Running the Container
+
+To run the application in a Docker container:
+
+```bash
+docker run -p 7860:7860 --env-file .env google-ai-agent
+```
+
+The application will be available at `http://localhost:7860`
+
+### Notes
+- The container uses Python 3.13.2
+- Port 7860 is exposed for the Gradio interface
+- Environment variables are loaded from your `.env` file
+- Make sure your `.env` file contains all necessary credentials
+
 ## Project Requirements
 
 Below is the list of required packages for this project:
