@@ -449,7 +449,7 @@ class Google_agent:
         config = {"configurable": {"thread_id": "1"}}
         response=self.agent.invoke({'query':input,
                                     'num_retries':0},config)
-        return response
+        return response.get('node_messages')[-1].content
 
     def stream(self,input:str):
         config = {"configurable": {"thread_id": "1"}}
