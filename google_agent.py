@@ -1,462 +1,375 @@
-from token_creator import get_creds
-get_creds()
+from __future__ import annotations
+from composio_langgraph import Action, ComposioToolSet, App
+from composio_tools_agent import Composio_agent
 
-from gmail_agent import Gmail_agent
-from calendar_agent import Calendar_agent
-from maps_agent import Maps_agent
-from contacts_agent import Contacts_agent
-from tasks_agent import Tasks_agent
-from langchain_google_genai import ChatGoogleGenerativeAI
-
-from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
-
-from langchain_core.messages import (
-    HumanMessage,
-    AIMessage,
-    
-)
-from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.prompts import PromptTemplate
-from langchain.output_parsers import RetryOutputParser
-
-
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.store.memory import InMemoryStore
+from pydantic_graph import BaseNode, End, GraphRunContext, Graph
+from pydantic_ai import Agent
+from datetime import datetime
 
 from pydantic import BaseModel,Field
+from dataclasses import dataclass
 
-from typing_extensions import TypedDict
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 
-import os
-from dotenv import load_dotenv 
+
+
 
 #get graph visuals
 from IPython.display import Image, display
-from langchain_core.runnables.graph import MermaidDrawMethod
 import os
 import requests
-import gradio as gr
-
-load_dotenv()
-GOOGLE_API_KEY=os.getenv('google_api_key')
-pse=os.getenv('pse')
+import nest_asyncio
+nest_asyncio.apply()
 
 
-GEMINI_MODEL='gemini-2.0-flash'
-llm = ChatGoogleGenerativeAI(google_api_key=GOOGLE_API_KEY, model=GEMINI_MODEL, temperature=0.3)
 
-mail_agent=Gmail_agent(llm)
-calendar_agent=Calendar_agent(llm)
-maps_agent=Maps_agent(llm)
-tasks_agent=Tasks_agent(llm)
-contacts_agent=Contacts_agent(llm)
 
-store=InMemoryStore()
 
-class State(TypedDict):
-    node_messages: Annotated[List, add_messages]
+
+@dataclass
+class State:
+    node_messages:list
+    evaluator_message:str
+    node_query:str
     query: str
     plan: List
-    node_query:str
-
-class ManagerCapability(BaseModel):
-    """Represents a specific capability that a manager tool provides"""
-    action: str = Field(..., description="The specific action that can be performed")
-    description: str = Field(None, description="Optional description of what this capability does")
-
-class ManagerTool(BaseModel):
-    """Represents a manager tool and its capabilities"""
-    name: str = Field(..., description="The name of the manager tool")
-    tool_function: str = Field(..., description="The function name used to call this tool")
-    description: str = Field(..., description="General description of what this tool does")
-    capabilities: List[ManagerCapability] = Field(..., description="List of capabilities this tool provides")
-
-
-
-class ManagerTools(BaseModel):
-    """Collection of all available manager tools and their capabilities"""
-    managers: List[ManagerTool] = Field(
-        default=[
-            ManagerTool(
-                name="Maps Manager",
-                tool_function="maps_manager",
-                description="Tool to use to answer maps and location queries",
-                capabilities=[
-                    ManagerCapability(action="find locations", description="Such as restaurants, bowling alleys, museums and others"),
-                    ManagerCapability(action="display location info", description="Shows address, name, URL, price range")
-                ]
-            ),
-            ManagerTool(
-                name="Google images tool",
-                tool_function="google_image_tool",
-                description="Tool to use to get images",
-                capabilities=[
-                    ManagerCapability(action="get image", description="returns a url of the image"),
-                ]),
-            ManagerTool(
-                name="Contacts Manager",
-                tool_function="contacts_manager",
-                description="Tool to use to answer queries about a contact or a person",
-                capabilities=[
-                    ManagerCapability(action="list contacts", description="Shows all available contacts"),
-                    ManagerCapability(action="get contact details", description="Retrieves information about a specific contact, like email addresses"),
-                    ManagerCapability(action="delete contact", description="Removes a contact from the list"),
-                    ManagerCapability(action="create contact", description="Adds a new contact to the list"),
-                    ManagerCapability(action="modify contact", description="Updates information for an existing contact")
-                ]
-            ),
-            ManagerTool(
-                name="Tasks Manager",
-                tool_function="tasks_manager",
-                description="Tool to use to answer task related queries",
-                capabilities=[
-                    ManagerCapability(action="list tasks", description="Shows all available tasks"),
-                    ManagerCapability(action="create task", description="Adds a new task"),
-                    ManagerCapability(action="get task details", description="Retrieves information about a specific task"),
-                    ManagerCapability(action="complete task", description="Marks a task as completed and deletes it"),
-                    ManagerCapability(action="list_tasks_from_specific_tasklist", description="list the task from a specified tasklist"),
-                    ManagerCapability(action="show_tasklists", description="show the available tasklists"),
-                    ManagerCapability(action="show_tasklists", description="show the available tasklists"),
-
-
-                ]
-            ),
-            ManagerTool(
-                name="Mail Manager",
-                tool_function="mail_manager",
-                description="Tool to use to answer any email related queries",
-                capabilities=[
-                    
-                    ManagerCapability(action="show inbox", description="Displays all emails in the inbox"),
-                    ManagerCapability(action="display mail details", description="Retrieves the details of a specific email"),
-                    ManagerCapability(action="create email", description="Composes a new email using the email adress"),
-                    ManagerCapability(action="verify email content", description="Checks the content of an email"),
-                    ManagerCapability(action="send email", description="Sends a composed email")
-            
-                ]
-            ),
-            ManagerTool(
-                name="Calendar Manager",
-                tool_function="calendar_manager",
-                description="Tool to use to answer any calendar or schedule related queries",
-                capabilities=[
-                    ManagerCapability(action="create recurring events", description="Sets up events that repeat on a schedule"),
-                    ManagerCapability(action="create quick events", description="Quickly adds a one-time event"),
-                    ManagerCapability(action="refresh calendar", description="Updates the calendar with latest information"),
-                    ManagerCapability(action="show calendar", description="Displays the calendar view")
-                ]
-            )
-        ],
-        description="The complete list of available manager tools"
-    )
-
-manager_tools = ManagerTools()
-
-# For Pydantic V2 
-manager_dict = manager_tools.model_dump()
-
-
-def planner_node(state: State):
-    class task_shema(BaseModel):
-        task: str = Field(description='description of the task')
-        manager_tool: str = Field(description= 'the name of the manager tool to use')
-        action: str = Field(description=' the action that the manager tool must take')
-    class plan_shema(BaseModel):
-        tasks: List[task_shema] = Field(description='the list of tasks that the agent need to complete to succesfully complete the query')
-    parser=JsonOutputParser(pydantic_object=plan_shema)
-    prompt = PromptTemplate(
-    template="Answer the user query.\n{format_instructions}\n{query}\n",
-    input_variables=["query"],
-    partial_variables={"format_instructions": parser.get_format_instructions()},
-    )
-
-    
-    chain = prompt | llm 
-    try:
-        response=chain.invoke({'query':f'based on this query: {state['query']} generate a plan using those manager tools: {manager_dict} to get the necessary info and to complete the query, the plan cannot contain more than 10 tasks'}) 
-        try:
-            response=parser.parse(response.content)
-            
-            return {'plan':response.get('tasks')}
-        except:
-            try:
-                retry_parser = RetryOutputParser.from_llm(parser=parser, llm=llm)
-
-                prompt_value = prompt.format_prompt(query=state['query'])
-                response=retry_parser.parse_with_prompt(response.content, prompt_value) 
-        
-               
-                return {'plan':response.get('tasks')}
-            except:
-                return {'route':'END'}
-    except:
-                return {'route':'END'}
-
-
-def agent_node(state: State):
-    class task_route(BaseModel):
-        node_query: str = Field(description='the query to be passed to one of the manager tool nodes')
-        route: str = Field (description='the name of the manager tool to use or if finished END')
-    plan= state.get('plan')
-    
-
-    
-    # node_messages=state.get('node_messages')
-    parser=JsonOutputParser(pydantic_object=task_route)
-    prompt = PromptTemplate(
-    template="Answer the user query.\n{format_instructions}\n{query}\n",
-    input_variables=["query"],
-    partial_variables={"format_instructions": parser.get_format_instructions()},
-    )
-
-    
-    chain = prompt | llm 
-    if plan:
-        response=chain.invoke({'query':f'based on this task: {plan[0]} generate a query to be passed to the manager_tool mentionned in the task, use the informations from previous nodes {state.get('node_messages')}, and chose a route to the corresponding manager tool from this list {manager_dict}'}) 
-        try:
-            response=parser.parse(response.content)
-            
-            return {'node_query':response.get('node_query'),
-                    'route':response.get('route')}
-        except:
-            try:
-                retry_parser = RetryOutputParser.from_llm(parser=parser, llm=llm)
-
-                prompt_value = prompt.format_prompt(query=state['query'])
-                response=retry_parser.parse_with_prompt(response.content, prompt_value) 
-                
-                return {'node_query':response.get('node_query'),
-                    'route':response.get('route')}
-            except:
-                return {'route':'END'}
-    else:
-        return {'route':'END'}
-
-
-def router(state: State):
-    route=state.get('route')
-    routing_map = {
-        'Maps Manager': 'to_maps_manager',
-        'Google images tool': 'to_google_image_tool',
-        'Contacts Manager': 'to_contact_manager',
-        'Tasks Manager': 'to_tasks_manager',
-        'Mail Manager': 'to_mail_manager',
-        'Calendar Manager': 'to_calendar_manager',
-        'END':'to_end'
-    }
-    return routing_map.get(route)
-
-def evaluator_node(state: State):
-    node_message=state.get('node_messages')
-    
-    class Status(BaseModel):
-        status: str = Field(description='completed or failed')
-    parser=JsonOutputParser(pydantic_object=Status)
-    prompt = PromptTemplate(
-    template="Answer the user query.\n{format_instructions}\n{query}\n",
-    input_variables=["query"],
-    partial_variables={"format_instructions": parser.get_format_instructions()},
-    )
-
-    
-    chain = prompt | llm 
-    try:
-        response=chain.invoke({'query':f'based on this node message: {node_message[-1].content} and the prompt: {state.get('node_query')}, decide if the task was completed or failed '}) 
-       
-        response=parser.parse(response.content)
-            
-    except:
-        retry_parser = RetryOutputParser.from_llm(parser=parser, llm=llm)
-
-        prompt_value = prompt.format_prompt(query=state['query'])
-        response=retry_parser.parse_with_prompt(response.content, prompt_value) 
-        
-    status=response.get('status')          
-               
-    
-    if status =='failed':
-            return {'plan':[],
-                    'node_messages':f' task: {state.get('node_query')}, failed'}
-    else:
-        plan=state.get('plan')
-        del plan[0]
-        return {'plan':plan}
-
-def google_image_search_node(state:State):
-  """Search for images using Google Custom Search API
-  args: query
-  return: image url
-  """
-  # Define the API endpoint for Google Custom Search
-  url = "https://www.googleapis.com/customsearch/v1"
-  query=state.get('node_query')
-
-  params = {
-      "q": query,
-      "cx": pse,
-      "key": GOOGLE_API_KEY,
-      "searchType": "image",  # Search for images
-      "num": 1  # Number of results to fetch
-  }
-
-  # Make the request to the Google Custom Search API
-  response = requests.get(url, params=params)
-  data = response.json()
-
-  # Check if the response contains image results
-  if 'items' in data:
-      # Extract the first image result
-      image_url = data['items'][0]['link']
-      return {'node_messages':f' here is the url for the image {image_url}'}
-  else:
-      return {'node_messages':'failed'}
-
-def contacts_manager_node(state: State):
-    """use this tool to answer queries about a contact or a person
-    this tool can:
-    list my contacts
-    get a contact's details
-    delete a contact
-    create a contact
-    modify a contact
-    args: query - pass the entire contacts related queries directly here
-    """
-    response=contacts_agent.chat(state.get('node_query'))
-    # return response
-    return {'node_messages':[AIMessage(f'{response}')]}
-
-
-
-def tasks_manager_node(state: State):
-    """use this tool to answer task related queries
-    this tool can:
-    list tasks
-    create tasks
-    get task details
-    complete a task (which also deletes it :) )
-
-    args: query - pass the entire tasks related queries directly here
-    
-    """
-
-
-    response=tasks_agent.chat(state.get('node_query'))
-    # return response
-    return {'node_messages':[AIMessage(f'{response}')]}
-
-
-def maps_manager_node(state: State):
-    """tool to use to answer maps and location queries
-    this tool can:
-    find locations such as restorants, bowling alleys, museums and others
-    display those locations's infos (eg. adress, name, url, price range)
-    args: query - pass the maps or loc related queries directly here
-    return: locations with urls
-    """
-    response=maps_agent.chat(state.get('node_query'))
-    # return response
-    return {'node_messages':[AIMessage(f'{response}')]}
-
-
-
-def mail_manager_node(state: State):
-    """Tool to use to answer any email related queries
-    this tool can:
-    show the inbox
-    get a specific mail's content to display
-  
-    create an email
-    verify the email content
-    send the email
-
-    args: query - pass the email related queries directly here
-    """
-    response=mail_agent.chat(state.get('node_query'))
-    # return response
-    return {'node_messages':[AIMessage(f'{response}')]}
-
-
-def calendar_manager_node(state: State):
-    """tool to use to answere any calendar or schedule related queries
-    this tool can:
-    create recuring events
-    create quick events
-    show the calendar
-    args: query - pass the entire calendar related queries directly here
-    """
-    response=calendar_agent.chat(state.get('node_query'))
-    # return response
-    return {'node_messages':[AIMessage(f'{response}')]}
-
-
+    route:str
+    #planning notes are notes to improve the planning or use of a tool based on a prompt
+    planning_notes:str
+    #query notes are notes to help the agent to fulfill the requirements of the user
+    query_notes:dict
+    #action exclusive outputs
+    #mail inbox is the inbox of the user
+    mail_inbox:dict
 class Google_agent:
-    def __init__(self):
-        self.agent=self._setup()
-    def _setup(self):
-   
-        graph_builder = StateGraph(State)
-
-        # Modification: tell the LLM which tools it can call
-
-        graph_builder.add_node("planner", planner_node)
-        graph_builder.add_node('calendar_manager', calendar_manager_node)
-        graph_builder.add_node('mail_manager',mail_manager_node)
-        graph_builder.add_node('tasks_manager',tasks_manager_node)
-        graph_builder.add_node('contacts_manager',contacts_manager_node)
-        graph_builder.add_node('maps_manager',maps_manager_node)
-        graph_builder.add_node('google_image_tool',google_image_search_node)
-        graph_builder.add_node('evaluator', evaluator_node)
-        
-        graph_builder.add_node("agent", agent_node)
-        # Any time a tool is called, we return to the chatbot to decide the next step
-        graph_builder.add_edge(START,'planner')
-        graph_builder.add_edge("planner", "agent")
-        graph_builder.add_edge("maps_manager", "evaluator")
-        graph_builder.add_edge('tasks_manager','evaluator')
-        graph_builder.add_edge('mail_manager','evaluator')
-        graph_builder.add_edge('google_image_tool','evaluator')
-        graph_builder.add_edge('contacts_manager','evaluator')
-        graph_builder.add_edge('calendar_manager','evaluator')
-        graph_builder.add_edge('evaluator', 'agent')
-        graph_builder.add_conditional_edges(
-            "agent",
-            router,{
-            'to_maps_manager': 'maps_manager',
-            'to_google_image_tool': 'google_image_tool',
-            'to_contact_manager': 'contacts_manager',
-            'to_tasks_manager': 'tasks_manager',
-            'to_mail_manager': 'mail_manager',
-            'to_calendar_manager': 'calendar_manager',
-            'to_end': END
+    def __init__(self,llms: dict, api_keys:dict):
+        """
+        Args:
+            llm (any): The language model to use using langchain_framework
+            api_keys (dict): The API keys to use
+        """
+        # tools is the composio toolset
+        self.tools=ComposioToolSet(api_key=api_keys['composio_key'])
+        # tool_shemas is a dictionary of the tool names and the actions they can perform
+        self.tool_shemas={
+            'Mail Manager':{tool.name:tool for tool in self.tools.get_action_schemas(apps=[App.GMAIL])},
+            'Maps Manager':{tool.name:tool for tool in self.tools.get_action_schemas(apps=[App.GOOGLE_MAPS])},
+            'Tasks Manager':{tool.name:tool for tool in self.tools.get_action_schemas(apps=[App.GOOGLETASKS])},
+            'Google images tool':{'search_images':'search for images'},
+            'Get current time':{'get_current_time':'get the current time'},
+            'improve_planning_tool':{'planning_improvement':'notes to improve the planning or use of a tool based on a prompt'},
+            'list_tools':{'list_tools':'list the tools available'},
+            'query_notes_editor':{'query_notes_editor':'edit the query notes to fulfill the requirements of the tool'}
+        }
+        # tool_functions is a dictionary of the tool names and the actions they can perform
+        self.tool_functions={
+            'managers':{
+                'Mail Manager':{
+                    'actions':{tool.name:{'description':tool.description} for tool in self.tools.get_tools(apps=[App.GMAIL])}
+                },
+                'Maps Manager':{
+                    'actions':{tool.name:{'description':tool.description} for tool in self.tools.get_tools(apps=[App.GOOGLE_MAPS])}
+                },
+                'Tasks Manager':{
+                    'actions':{tool.name:{'description':tool.description} for tool in self.tools.get_tools(apps=[App.GOOGLETASKS])}
+                },
+                'Google images tool':{
+                    'actions':{'search_images':{'description':'search for images'}}
+                },
+                'improve_planning_tool':{
+                    'actions':{'planning_improvement':{'description':'notes to improve the planning or use of a tool based on a prompt'}}
+                },
+                'Get current time':{
+                    'actions':{'get_current_time':{'description':'get the current time'}}
+                },
+                'list_tools':{
+                    'actions':{'list_tools':{'description':'list the tools available'}}
+                },
+                'query_notes_editor':{
+                    'actions':{'query_notes_editor':{'description':'edit the query notes to fulfill the requirements of the tool'}}
+                }
             }
-        )
-        memory=MemorySaver()
-        graph=graph_builder.compile(checkpointer=memory,store=store)
-        return graph
+        }
+        # agents are the composio agents for the tools
+        self.mail_agent=Composio_agent(self.tools.get_tools(apps=[App.GMAIL]),llms['openai_llm'])
+        self.maps_agent=Composio_agent(self.tools.get_tools(apps=[App.GOOGLE_MAPS]),llms['openai_llm'])
+        self.tasks_agent=Composio_agent(self.tools.get_tools(apps=[App.GOOGLETASKS]),llms['openai_llm'])
         
+    
+
+        # Nodes:
+        # planner_node is the node that generates the plan
+        @dataclass
+        class Agent_node(BaseNode[State]):
+            llm=llms['pydantic_llm']
+            tool_functions=self.tool_functions
+            async def run(self,ctx: GraphRunContext[State])->Query_generator_node | End:
+                class task_shema(BaseModel):
+                    task: str = Field(description='the task to be passed to one of the manager tool nodes')
+                    manager_tool: str = Field(description= 'the name of the manager tool to use')
+                    action: str = Field(description=' the action that the manager tool must take from the actions of the manager tool')
+                class plan_shema(BaseModel):
+                    tasks: List[task_shema] = Field(description='the list of tasks that the agent need to complete to succesfully complete the query')
+                #generate the plan
+                plan_agent=Agent(self.llm,output_type=plan_shema, instructions=f'based on a query, and the previous node messages (if any), generate a plan using those manager tools: {self.tool_functions} to get the necessary info and to complete the query, use the planning notes to improve the planning, if any, the plan cannot contain more than 10 tasks')
+                try:
+                    response=plan_agent.run_sync(f'query:{ctx.state.query}, planning_notes:{ctx.state.planning_notes}, previous_node_messages:{ctx.state.node_messages}') 
+                    ctx.state.plan=response.output.tasks
+                    return Query_generator_node()
+                #if the plan is not generated, return the state
+                except:
+                    return End(ctx.state)
+        @dataclass
+        class Query_generator_node(BaseNode[State]):
+            llm=llms['pydantic_llm']
+            async def run(self,ctx: GraphRunContext[State])->router_node | End:
+           
+                #generate the query
+                class Query_generator_shema(BaseModel):
+                    query: str = Field(description='the query to be passed to one of the manager tool nodes')
+                agent=Agent(self.llm,output_type=Query_generator_shema, instructions=f'based on a query, and the previous node messages (if any) generate a query, use the query notes to improve the query so it fits the requirements of the user')
+                plan=ctx.state.plan
+                if plan:
+                    if ctx.state.query_notes.get(plan[0].manager_tool):
+                        if ctx.state.query_notes[plan[0].manager_tool].get(plan[0].action):
+                            query_notes=ctx.state.query_notes[plan[0].manager_tool][plan[0].action]["query_notes"]
+                        else:
+                            query_notes="no query notes"
+                    else:
+                        query_notes="no query notes"
+
+                
+                    response=agent.run_sync(f'query:{plan[0].task}, query_notes:{query_notes}, previous_node_messages:{ctx.state.node_messages}')    
+                    ctx.state.node_query=response.output.query
+                    return router_node()
+                else:
+                    return End(ctx.state)
+        # agent_node is the node that uses the plan to complete the task and update the node_query if needed
+        @dataclass
+        class router_node(BaseNode[State]):
+            async def run(self,ctx: GraphRunContext[State])-> get_current_time_node | maps_manager_node | tasks_manager_node | mail_manager_node | google_image_search_node | list_tools_node | planning_improve_node | query_notes_editor_node | End:
+                plan= ctx.state.plan
+                
+                #get the manager tool to use
+                ctx.state.route=plan[0].manager_tool
+                if ctx.state.route=='get_current_time':
+                    return get_current_time_node()
+                elif ctx.state.route=='Maps Manager':
+                    return maps_manager_node()
+                elif ctx.state.route=='Tasks Manager':
+                    return tasks_manager_node()
+                elif ctx.state.route=='Mail Manager':
+                    return mail_manager_node()
+                elif ctx.state.route=='Google images tool':
+                    return google_image_search_node()
+                elif ctx.state.route=='improve_planning_tool':
+                    return planning_improve_node()
+                elif ctx.state.route=='list_tools':
+                    return list_tools_node()
+                elif ctx.state.route=='query_notes_editor':
+                    return query_notes_editor_node()
+                else:
+                    return End(ctx.state)
+                    
+
+        # evaluator_node is the node that evaluates the task and prompts the agent to retry or update the node_query if needed
+        class evaluator_node(BaseNode[State]):
+            llm=llms['pydantic_llm']
+            async def run(self,ctx: GraphRunContext[State])-> Query_generator_node | End:
+            
+                class Status(BaseModel):
+                    status: str = Field(description='completed, failed')
+                    reason: Optional[str] = Field(default_factory=None,description='the reason for the status, if the status is completed, the reason should be None')
+                evaluator_agent=Agent(self.llm,output_type=Status, instructions=f'based on the node message and the prompt, decide if the task was completed or failed,look for errors in the node message, if failed, explain why')
+
+                
+                response=evaluator_agent.run_sync(f'node_message:{ctx.state.node_messages[-1]}, node_query:{ctx.state.plan[0].task}')
+                    
+                status=response.output.status          
+                        
+                # if the task is failed, prompt the agent to retry or update the node_query if needed
+                if status =='failed':
+                    ctx.state.evaluator_message=f'task: {ctx.state.plan[0]}, failed, reason: {response.output.reason}'
+                    ctx.state.node_messages.append({'google_agent':ctx.state.evaluator_message})
+                    if len(ctx.state.node_messages)>10:
+                        del ctx.state.node_messages[0]
+                    return End(ctx.state)
+                else:
+                    ctx.state.evaluator_message=''
+                    del ctx.state.plan[0]
+                    if len(ctx.state.node_messages)>10:
+                            del ctx.state.node_messages[0]
+                    return Query_generator_node()
+
+
+        class google_image_search_node(BaseNode[State]):
+            async def run(self,ctx: GraphRunContext[State])->evaluator_node:
+                """Search for images using Google Custom Search API
+                args: query
+                return: image url
+                """
+                # Define the API endpoint for Google Custom Search
+                url = "https://www.googleapis.com/customsearch/v1"
+                query=ctx.state.node_query
+
+                params = {
+                    "q": query,
+                    "cx": api_keys['pse'],
+                    "key": api_keys['google_api_key'],
+                    "searchType": "image",  # Search for images
+                    "num": 1  # Number of results to fetch
+                }
+
+                # Make the request to the Google Custom Search API
+                response = requests.get(url, params=params)
+                data = response.json()
+
+                # Check if the response contains image results
+                if 'items' in data:
+                    # Extract the first image result
+                    image_url = data['items'][0]['link']
+                    ctx.state.node_messages.append({'google_image_search':f'here is the url for the image {image_url}'})
+                    return evaluator_node()
+                else:
+                    ctx.state.node_messages.append({'google_image_search':'failed to find image'})
+                    return evaluator_node()
+        @dataclass
+        class planning_improve_node(BaseNode[State]):
+            llm=llms['pydantic_llm']
+            tool_functions=self.tool_functions
+            async def run(self,ctx: GraphRunContext[State])->End:
+                class planning_improve_shema(BaseModel):
+                    planning_improvement: str = Field(description='the planning improvement notes')
+                agent=Agent(self.llm,output_type=planning_improve_shema, instructions=f'based on the dict of tools and the prompt, create a notes to improve the planning or use of a tool for the planner node')
+                response=agent.run_sync(f'prompt:{ctx.state.query}, tool_functions:{self.tool_functions}')
+                ctx.state.planning_notes=response.output.planning_improvement
+                return End(f'planning_improvement:{response.output.planning_improvement}')
+        
+        @dataclass
+        class query_notes_editor_node(BaseNode[State]):
+            llm=llms['pydantic_llm']
+            tool_functions=self.tool_functions
+            async def run(self,ctx: GraphRunContext[State])->End:
+                class query_notes_shema(BaseModel):
+                    query_notes: str = Field(description='the query notes has to be an explanation of how to use the tool to complete the task')
+                    manager_tool: str = Field(description='the name of the manager tool for the query')
+                    action: str = Field(description='the action that the manager tool must take')
+
+                agent=Agent(self.llm,output_type=query_notes_shema, instructions=f'based on the user query, and the tools, edit the query notes to help the agent to fulfill the requirements of the user')
+                response=agent.run_sync(f'prompt:{ctx.state.query}, tool_functions:{self.tool_functions}')
+                if ctx.state.query_notes.get(response.output.manager_tool):
+                    ctx.state.query_notes[response.output.manager_tool][response.output.action]={'query_notes':response.output.query_notes}
+                else:
+                    ctx.state.query_notes[response.output.manager_tool]={response.output.action:{'query_notes':response.output.query_notes}}
+                return End(f'query_notes:{response.output.manager_tool:{response.output.action:{response.output.query_notes}}}')
+
+        @dataclass
+        class tasks_manager_node(BaseNode[State]):
+            """use this tool to answer task related queries
+            this tool can:
+            list tasks
+            create tasks
+            get task details
+            complete a task (which also deletes it :) )
+
+            args: query - pass the entire tasks related queries directly here
+            
+            """
+            tasks_agent=self.tasks_agent
+            async def run(self,ctx: GraphRunContext[State])->evaluator_node:
+                response=self.tasks_agent.chat(ctx.state.node_query+ 'if there is an error, explain it in detail')
+                # return response
+                ctx.state.node_messages.append({'tasks_manager':response})
+                return evaluator_node()
+
+
+        @dataclass
+        class maps_manager_node(BaseNode[State]):
+            """tool to use to answer maps and location queries
+            this tool can:
+            find locations such as restorants, bowling alleys, museums and others
+            display those locations's infos (eg. adress, name, url, price range)
+            args: query - pass the maps or loc related queries directly here
+            return: locations with urls
+            """
+            maps_agent=self.maps_agent
+            async def run(self,ctx: GraphRunContext[State])->evaluator_node:
+                response=self.maps_agent.chat(ctx.state.node_query + 'if there is an error, explain it in detail')
+                # return response
+                ctx.state.node_messages.append({'maps_manager':response})
+                return evaluator_node()
+
+
+
+        @dataclass
+        class mail_manager_node(BaseNode[State]):
+            """Tool to use to answer any email related queries
+            this tool can:
+            show the inbox
+            
+            create an email
+            create a draft email
+            verify the email content
+            send the email
+
+            args: query - pass the email related queries directly here
+            """
+            
+            mail_agent=self.mail_agent
+            async def run(self,ctx: GraphRunContext[State])->evaluator_node:
+                
+                response=self.mail_agent.chat(ctx.state.node_query + f'if the query is about sending an email, do not send any attachements, just send the url in the body, if there is an error, explain it in detail')
+                # return response
+                ctx.state.node_messages.append({'mail_manager':response})
+                #save the inbox in the state for future use
+                if ctx.state.plan[0].action=='GMAIL_FETCH_EMAILS':
+                    ctx.state.mail_inbox=response
+                return evaluator_node()
+
+
+
+        
+        class get_current_time_node(BaseNode[State]):
+            """
+            Use this tool to get the current time.
+            Returns:
+                str: The current time in a formatted string
+            """
+            async def run(self,ctx: GraphRunContext[State])->evaluator_node:
+                ctx.state.node_messages.append({'get_current_time':f"The current time is {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"})
+                return evaluator_node()
+            
+        @dataclass
+        class list_tools_node(BaseNode[State]):
+            tools=self.tool_functions
+            async def run(self,ctx: GraphRunContext[State])->End:
+                ctx.state.node_messages.append({'list_tools':self.tools})
+                return End(ctx.state)
+
+        self.graph=Graph(nodes=[Agent_node, router_node, evaluator_node, google_image_search_node, tasks_manager_node, maps_manager_node, mail_manager_node, get_current_time_node, list_tools_node, planning_improve_node, query_notes_editor_node, Query_generator_node])
+        self.state=State(node_messages=[], evaluator_message='', node_query='', query='', plan=[], route='', planning_notes='', query_notes={}, mail_inbox=[])
+        self.Agent_node=Agent_node()
+        
+    def chat(self,query:str):
+        """Chat with the google agent,
+        Args:
+            query (str): The query to search for
+        Returns:
+            str: The response from the google agent
+        """
+        self.state.query=query
+        response=self.graph.run_sync(self.Agent_node,state=self.state)
+        return response.output
 
     def display_graph(self):
-        return display(
-                        Image(
-                                self.agent.get_graph().draw_mermaid_png(
-                                    draw_method=MermaidDrawMethod.API,
-                                )
-                            )
-                        )
-    def chat(self,input:str):
-        config = {"configurable": {"thread_id": "1"}}
-        response=self.agent.invoke({'query':input,
-                                    'num_retries':0},config)
-        return response.get('node_messages')[-1].content
-
-    def stream(self,input:str):
-        config = {"configurable": {"thread_id": "1"}}
-        for event in self.agent.stream({'query':input,
-                                        'num_retries':0}, config, stream_mode="updates"):
-            print(event)
-    
-    def get_state(self, state_val:str):
-        config = {"configurable": {"thread_id": "1"}}
-        return self.agent.get_state(config).values[state_val]
+        """Display the graph of the google agent
+        Returns:
+            Image: The image of the graph
+        """
+        image=self.graph.mermaid_image()
+        return display(Image(image))
+    def reset(self):
+        """Reset the state of the google agent
+        """
+        self.state=State(node_messages=[], evaluator_message='', node_query='', query='', plan=[], route='', planning_notes='', query_notes={}, mail_inbox=[])
+        return 'agent reset'
