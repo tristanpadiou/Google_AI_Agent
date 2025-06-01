@@ -240,8 +240,8 @@ class Google_agent:
             async def run(self,ctx: GraphRunContext[State])->End:
                 class planning_improve_shema(BaseModel):
                     planning_improvement: str = Field(description='the planning improvement notes')
-                agent=Agent(self.llm,output_type=planning_improve_shema, instructions=f'based on the dict of tools and the prompt, create a notes to improve the planning or use of a tool for the planner node')
-                response=agent.run_sync(f'prompt:{ctx.state.query}, tool_functions:{self.tool_functions}')
+                agent=Agent(self.llm,output_type=planning_improve_shema, instructions=f'based on the dict of tools and the prompt, and the previous planning notes (if any), create a notes to improve the planning or use of a tool for the planner node')
+                response=agent.run_sync(f'prompt:{ctx.state.query}, tool_functions:{self.tool_functions}, previous_planning_notes:{ctx.state.planning_notes if ctx.state.planning_notes else "no previous planning notes"}')
                 ctx.state.planning_notes=response.output.planning_improvement
                 return End(f'planning_improvement:{response.output.planning_improvement}')
         
