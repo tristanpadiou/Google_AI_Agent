@@ -28,7 +28,8 @@ nest_asyncio.apply()
 
 @dataclass
 class State:
-    node_messages:list
+    node_messages_dict:dict
+    node_messages_list:list
     evaluator_message:str
     node_query:str
     query: str
@@ -56,10 +57,10 @@ class Google_agent:
             'Maps Manager':{tool.name:tool for tool in self.tools.get_action_schemas(apps=[App.GOOGLE_MAPS])},
             'Tasks Manager':{tool.name:tool for tool in self.tools.get_action_schemas(apps=[App.GOOGLETASKS])},
             'Google images tool':{'search_images':'search for images'},
-            'Get current time':{'get_current_time':'get the current time'},
-            'improve_planning_tool':{'planning_improvement':'notes to improve the planning or use of a tool based on a prompt'},
-            'list_tools':{'list_tools':'list the tools available'},
-            'query_notes_editor':{'query_notes_editor':'edit the query notes to fulfill the requirements of the tool'}
+            'Get_current_time':{'get_current_time':'get the current time'},
+            'Improve_planning_tool':{'planning_improvement':'notes to improve the planning or use of a tool based on a prompt'},
+            'List_tools':{'list_tools':'list the tools available'},
+            'Query_notes_editor':{'query_notes_editor':'edit the query notes to fulfill the requirements of the tool'}
         }
         # tool_functions is a dictionary of the tool names and the actions they can perform
         self.tool_functions={
@@ -76,16 +77,16 @@ class Google_agent:
                 'Google images tool':{
                     'actions':{'search_images':{'description':'search for images'}}
                 },
-                'improve_planning_tool':{
+                'Improve_planning_tool':{
                     'actions':{'planning_improvement':{'description':'notes to improve the planning or use of a tool based on a prompt'}}
                 },
-                'Get current time':{
+                'Get_current_time':{
                     'actions':{'get_current_time':{'description':'get the current time'}}
                 },
-                'list_tools':{
+                'List_tools':{
                     'actions':{'list_tools':{'description':'list the tools available'}}
                 },
-                'query_notes_editor':{
+                'Query_notes_editor':{
                     'actions':{'query_notes_editor':{'description':'edit the query notes to fulfill the requirements of the tool'}}
                 }
             }
@@ -152,7 +153,7 @@ class Google_agent:
                 
                 #get the manager tool to use
                 ctx.state.route=plan[0].manager_tool
-                if ctx.state.route=='get_current_time':
+                if ctx.state.route=='Get_current_time':
                     return get_current_time_node()
                 elif ctx.state.route=='Maps Manager':
                     return maps_manager_node()
@@ -162,11 +163,11 @@ class Google_agent:
                     return mail_manager_node()
                 elif ctx.state.route=='Google images tool':
                     return google_image_search_node()
-                elif ctx.state.route=='improve_planning_tool':
+                elif ctx.state.route=='Improve_planning_tool':
                     return planning_improve_node()
-                elif ctx.state.route=='list_tools':
+                elif ctx.state.route=='List_tools':
                     return list_tools_node()
-                elif ctx.state.route=='query_notes_editor':
+                elif ctx.state.route=='Query_notes_editor':
                     return query_notes_editor_node()
                 else:
                     return End(ctx.state)
@@ -183,22 +184,27 @@ class Google_agent:
                 evaluator_agent=Agent(self.llm,output_type=Status, instructions=f'based on the node message and the prompt, decide if the task was completed or failed,look for errors in the node message, if failed, explain why')
 
                 
-                response=evaluator_agent.run_sync(f'node_message:{ctx.state.node_messages[-1]}, node_query:{ctx.state.plan[0].task}')
+                response=evaluator_agent.run_sync(f'node_message:{ctx.state.node_messages_list[-1]}, node_query:{ctx.state.plan[0].task}')
                     
                 status=response.output.status          
                         
                 # if the task is failed, prompt the agent to retry or update the node_query if needed
                 if status =='failed':
                     ctx.state.evaluator_message=f'task: {ctx.state.plan[0]}, failed, reason: {response.output.reason}'
-                    ctx.state.node_messages.append({'google_agent':ctx.state.evaluator_message})
-                    if len(ctx.state.node_messages)>10:
-                        del ctx.state.node_messages[0]
+                    if len(ctx.state.node_messages_list)>10:
+                        del ctx.state.node_messages_list[0]
+                    if ctx.state.node_messages_dict.get(ctx.state.plan[0].manager_tool):
+                        ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool][ctx.state.plan[0].action]=ctx.state.evaluator_message
+                    else:
+                        ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool]={ctx.state.plan[0].action:ctx.state.evaluator_message}
+                    ctx.state.node_messages_list.append({ctx.state.plan[0].manager_tool:{ctx.state.plan[0].action:ctx.state.evaluator_message}})
                     return End(ctx.state)
                 else:
                     ctx.state.evaluator_message=''
+                    if len(ctx.state.node_messages_list)>10:
+                        del ctx.state.node_messages_list[0]
                     del ctx.state.plan[0]
-                    if len(ctx.state.node_messages)>10:
-                            del ctx.state.node_messages[0]
+                    
                     return Query_generator_node()
 
 
@@ -228,10 +234,18 @@ class Google_agent:
                 if 'items' in data:
                     # Extract the first image result
                     image_url = data['items'][0]['link']
-                    ctx.state.node_messages.append({'google_image_search':f'here is the url for the image {image_url}'})
+                    if ctx.state.node_messages_dict.get(ctx.state.plan[0].manager_tool):
+                        ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool][ctx.state.plan[0].action]=f'here is the url for the image {image_url}'
+                    else:
+                        ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool]={ctx.state.plan[0].action:f'here is the url for the image {image_url}'}
+                    ctx.state.node_messages_list.append({ctx.state.plan[0].manager_tool:{ctx.state.plan[0].action:f'here is the url for the image {image_url}'}})
                     return evaluator_node()
                 else:
-                    ctx.state.node_messages.append({'google_image_search':'failed to find image'})
+                    if ctx.state.node_messages_dict.get(ctx.state.plan[0].manager_tool):
+                        ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool][ctx.state.plan[0].action]='failed to find image'
+                    else:
+                        ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool]={ctx.state.plan[0].action:'failed to find image'}
+                    ctx.state.node_messages_list.append({ctx.state.plan[0].manager_tool:{ctx.state.plan[0].action:'failed to find image'}})
                     return evaluator_node()
         @dataclass
         class planning_improve_node(BaseNode[State]):
@@ -243,7 +257,12 @@ class Google_agent:
                 agent=Agent(self.llm,output_type=planning_improve_shema, instructions=f'based on the dict of tools and the prompt, and the previous planning notes (if any), create a notes to improve the planning or use of a tool for the planner node')
                 response=agent.run_sync(f'prompt:{ctx.state.query}, tool_functions:{self.tool_functions}, previous_planning_notes:{ctx.state.planning_notes if ctx.state.planning_notes else "no previous planning notes"}')
                 ctx.state.planning_notes=response.output.planning_improvement
-                return End(f'planning_improvement:{response.output.planning_improvement}')
+                if ctx.state.node_messages_dict.get(ctx.state.plan[0].manager_tool):
+                    ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool][ctx.state.plan[0].action]=response.output.planning_improvement
+                else:
+                    ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool]={ctx.state.plan[0].action:response.output.planning_improvement}
+                ctx.state.node_messages_list.append({ctx.state.plan[0].manager_tool:{ctx.state.plan[0].action:response.output.planning_improvement}})
+                return End(ctx.state)
         
         @dataclass
         class query_notes_editor_node(BaseNode[State]):
@@ -261,7 +280,12 @@ class Google_agent:
                     ctx.state.query_notes[response.output.manager_tool][response.output.action]={'query_notes':response.output.query_notes}
                 else:
                     ctx.state.query_notes[response.output.manager_tool]={response.output.action:{'query_notes':response.output.query_notes}}
-                return End(f'query_notes:{response.output.manager_tool:{response.output.action:{response.output.query_notes}}}')
+                if ctx.state.node_messages_dict.get(ctx.state.plan[0].manager_tool):
+                    ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool][ctx.state.plan[0].action]=response.output.query_notes
+                else:
+                    ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool]={ctx.state.plan[0].action:{'query_notes':response.output.query_notes}}
+                ctx.state.node_messages_list.append({ctx.state.plan[0].manager_tool:{ctx.state.plan[0].action:{'query_notes':response.output.query_notes}}})
+                return End(ctx.state)
 
         @dataclass
         class tasks_manager_node(BaseNode[State]):
@@ -279,7 +303,11 @@ class Google_agent:
             async def run(self,ctx: GraphRunContext[State])->evaluator_node:
                 response=self.tasks_agent.chat(ctx.state.node_query+ 'if there is an error, explain it in detail')
                 # return response
-                ctx.state.node_messages.append({'tasks_manager':response})
+                if ctx.state.node_messages_dict.get(ctx.state.plan[0].manager_tool):
+                    ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool][ctx.state.plan[0].action]=response
+                else:
+                    ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool]={ctx.state.plan[0].action:response}
+                ctx.state.node_messages_list.append({ctx.state.plan[0].manager_tool:{ctx.state.plan[0].action:response}})
                 return evaluator_node()
 
 
@@ -296,7 +324,11 @@ class Google_agent:
             async def run(self,ctx: GraphRunContext[State])->evaluator_node:
                 response=self.maps_agent.chat(ctx.state.node_query + 'if there is an error, explain it in detail')
                 # return response
-                ctx.state.node_messages.append({'maps_manager':response})
+                if ctx.state.node_messages_dict.get(ctx.state.plan[0].manager_tool):
+                    ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool][ctx.state.plan[0].action]=response
+                else:
+                    ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool]={ctx.state.plan[0].action:response}
+                ctx.state.node_messages_list.append({ctx.state.plan[0].manager_tool:{ctx.state.plan[0].action:response}})
                 return evaluator_node()
 
 
@@ -319,11 +351,25 @@ class Google_agent:
             async def run(self,ctx: GraphRunContext[State])->evaluator_node:
                 
                 response=self.mail_agent.chat(ctx.state.node_query + f'if the query is about sending an email, do not send any attachements, just send the url in the body, if there is an error, explain it in detail')
-                # return response
-                ctx.state.node_messages.append({'mail_manager':response})
                 #save the inbox in the state for future use
                 if ctx.state.plan[0].action=='GMAIL_FETCH_EMAILS':
-                    ctx.state.mail_inbox=response
+                    inbox=[]
+                    for i in response['data']['messages']:
+                        mail={'message_id':i.get('messageId'),'thread_id':i.get('threadId'),'subject':i.get('subject'),'sender':i.get('sender'),'date':i.get('messageTimestamp'),'snippet':i.get('preview'), 'messageText':i.get('messageText')}
+                        inbox.append(mail)
+                    ctx.state.mail_inbox=inbox
+                    if ctx.state.node_messages_dict.get(ctx.state.plan[0].manager_tool):
+                        ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool][ctx.state.plan[0].action]=inbox
+                    else:
+                        ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool]={ctx.state.plan[0].action:inbox}
+                    ctx.state.node_messages_list.append({ctx.state.plan[0].manager_tool:{ctx.state.plan[0].action:inbox}})
+                else:
+                    # return response
+                    if ctx.state.node_messages_dict.get(ctx.state.plan[0].manager_tool):
+                        ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool][ctx.state.plan[0].action]=response
+                    else:
+                        ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool]={ctx.state.plan[0].action:response}
+                    ctx.state.node_messages_list.append({ctx.state.plan[0].manager_tool:{ctx.state.plan[0].action:response}})
                 return evaluator_node()
 
 
@@ -336,18 +382,26 @@ class Google_agent:
                 str: The current time in a formatted string
             """
             async def run(self,ctx: GraphRunContext[State])->evaluator_node:
-                ctx.state.node_messages.append({'get_current_time':f"The current time is {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"})
+                if ctx.state.node_messages_dict.get(ctx.state.plan[0].manager_tool):
+                    ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool][ctx.state.plan[0].action]=f"The current time is {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                else:
+                    ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool]={ctx.state.plan[0].action:f"The current time is {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"}
+                ctx.state.node_messages_list.append({ctx.state.plan[0].manager_tool:{ctx.state.plan[0].action:f"The current time is {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"}})
                 return evaluator_node()
             
         @dataclass
         class list_tools_node(BaseNode[State]):
             tools=self.tool_functions
             async def run(self,ctx: GraphRunContext[State])->End:
-                ctx.state.node_messages.append({'list_tools':self.tools})
-                return End(ctx.state)
+                if ctx.state.node_messages_dict.get(ctx.state.plan[0].manager_tool):
+                    ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool][ctx.state.plan[0].action]=self.tools
+                else:
+                    ctx.state.node_messages_dict[ctx.state.plan[0].manager_tool]={ctx.state.plan[0].action:self.tools}
+                ctx.state.node_messages_list.append({ctx.state.plan[0].manager_tool:{ctx.state.plan[0].action:self.tools}})
+                return evaluator_node()
 
         self.graph=Graph(nodes=[Agent_node, router_node, evaluator_node, google_image_search_node, tasks_manager_node, maps_manager_node, mail_manager_node, get_current_time_node, list_tools_node, planning_improve_node, query_notes_editor_node, Query_generator_node])
-        self.state=State(node_messages=[], evaluator_message='', node_query='', query='', plan=[], route='', planning_notes='', query_notes={}, mail_inbox=[])
+        self.state=State(node_messages_dict={}, node_messages_list=[], evaluator_message='', node_query='', query='', plan=[], route='', planning_notes='', query_notes={}, mail_inbox=[])
         self.Agent_node=Agent_node()
         
     def chat(self,query:str):
@@ -355,7 +409,7 @@ class Google_agent:
         Args:
             query (str): The query to search for
         Returns:
-            str: The response from the google agent
+            dict: The state of the google agent
         """
         self.state.query=query
         response=self.graph.run_sync(self.Agent_node,state=self.state)
@@ -371,5 +425,5 @@ class Google_agent:
     def reset(self):
         """Reset the state of the google agent
         """
-        self.state=State(node_messages=[], evaluator_message='', node_query='', query='', plan=[], route='', planning_notes='', query_notes={}, mail_inbox=[])
+        self.state=State(node_messages_dict={}, node_messages_list=[], evaluator_message='', node_query='', query='', plan=[], route='', planning_notes='', query_notes={}, mail_inbox=[])
         return 'agent reset'
