@@ -1,3 +1,4 @@
+from __future__ import annotations
 from langchain_google_genai import ChatGoogleGenerativeAI
 import os
 from google_agent import Google_agent
@@ -7,10 +8,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
-from pydantic_ai import Agent, BinaryContent
+from pydantic_ai import Agent, BinaryContent, RunContext
 
 from pydantic_ai.messages import ModelMessage
 from dataclasses import dataclass
+from pydantic import Field
 load_dotenv()
 import logfire
 logfire.configure(token=os.getenv('logfire_token'))
@@ -37,13 +39,25 @@ llms={'pydantic_llm':GoogleModel('gemini-2.0-flash', provider=GoogleProvider(api
 @dataclass
 class Message_history:
     messages:list[ModelMessage]
+@dataclass
+class Deps:
+    node_messages_dict:dict
+    node_messages_list:list
 
 #message history for the demo agent
 messages=Message_history(messages=[])
+#state for the demo agent
+
 #google agent class for the google agent
 google_agent=Google_agent(llms=llms, api_keys=api_keys)
 
-async def google_agent_tool(query:str):
+#adding planning notes to the agent
+google_agent.state.planning_notes='task manager:when the user asks for a list of tasks, you first need to get the list of tasklists and then get the list of tasks from the chosen tasklist\
+    unless the node messages already contain a list of tasklists, so generate a plan that includes getting the list of tasklists and then getting the list of tasks from the chosen tasklist\
+    image search: the image search tool can only search one image at a time, so if the user asks for multiple images, you need to add tasks for each image to the plan,\
+        sometimes when multiple manager tools and actions are needed, you might need to go back to the agent node to generate a plan that includes the needed manager tools and actions'
+
+async def google_agent_tool(ctx:RunContext[Deps], query:str):
     """
             ## Purpose
             This function provides an interface to interact with a Google agent that can perform multiple Google-related tasks simultaneously.
@@ -73,17 +87,55 @@ async def google_agent_tool(query:str):
 
             """
     res=google_agent.chat(query)
-    return res.node_messages[res.node_messages.keys()[-1]][res.node_messages[res.node_messages.keys()[-1]].keys()[-1]]
-async def reset_agent():
+    ctx.deps.node_messages_dict=res.node_messages_dict
+    ctx.deps.node_messages_list=res.node_messages_list
+    return res.node_messages_list
+async def reset_agent(ctx:RunContext[Deps]):
     """ use this tool to reset the agent in case you are stuck in an error or a loop or to start a new conversation
         the agent will be reset and the conversation will be cleared
     """
     google_agent.reset()
     messages.messages = []
+    ctx.deps.node_messages_dict={}
     return "agent reset"
 
-agent=Agent(model=llms['pydantic_llm'], tools=[google_agent_tool, reset_agent], instructions='you are a helpful assistant that can answer any query related to google services using the tools provided\
-            , howver not all queries require the use of the tools, some queries can be answered without the use of the tools by looking through your memory')
+async def short_term_memory_tool(ctx:RunContext[Deps],data_to_retrieve:str):
+
+    """
+    this tool is used to retrieve information from the previous tool calls
+    use this tool to answer questions by retrieving information from previous tool calls
+    use the manager_tool and action to get the information from the previous tool calls:
+    
+    
+    args:
+    data_to_retrieve:str - the data to retrieve from the previous tool calls
+    """
+    async def retrieval(manager_tool:str, action:str):
+        """
+        this tool is used to retrieve information from the previous tool calls
+        use this tool to answer questions by retrieving information from previous tool calls
+        use the manager_tool and action to get the information from the previous tool calls:
+        args:
+        manager_tool:str - the manager tool that applies to the question from the user from the managers and actions dictionary
+        action:str - the action that applies to the question from the user from the managers and actions dictionary
+        """
+        try:
+            return ctx.deps.node_messages_dict.get(manager_tool)[action]
+        except:
+            return ctx.deps.node_messages_dict
+
+
+    agent=Agent(model=llms['pydantic_llm'], tools=[retrieval], instructions='you are a memory retrieval assistant that can retrieve information from previous node messages dictionary using the manager tool and action')
+
+    response=agent.run_sync(data_to_retrieve + f'list of previous calls: {ctx.deps.node_messages_list}, managers and actions:{google_agent.tool_functions}')
+    
+    return response.output
+
+    
+
+deps=Deps(node_messages_dict={},node_messages_list=[])
+agent=Agent(model=llms['pydantic_llm'], tools=[google_agent_tool, reset_agent, short_term_memory_tool], instructions='you are a helpful assistant that can answer any query related to google services using the tools provided\
+            , howver not all queries require the use of the tools, you can use the short_term_memory_tool to answer questions by retrieving information from the previous tool calls messages')
 # initialize the message history
 
 def get_mail_inbox():
@@ -100,13 +152,13 @@ def chatbot(input, history, audio=None):
         
         if input and input.strip():
             # Both text and audio provided
-            response = agent.run_sync([input, BinaryContent(data=audio_data, media_type='audio/wav')], message_history=messages.messages)
+            response = agent.run_sync([input, BinaryContent(data=audio_data, media_type='audio/wav')], message_history=messages.messages, deps=deps)
         else:
             # Only audio provided
-            response = agent.run_sync([BinaryContent(data=audio_data, media_type='audio/wav')], message_history=messages.messages)
+            response = agent.run_sync([BinaryContent(data=audio_data, media_type='audio/wav')], message_history=messages.messages, deps=deps)
     else:
         # Only text input
-        response = agent.run_sync(input, message_history=messages.messages)
+        response = agent.run_sync(input, message_history=messages.messages, deps=deps)
     
     messages.messages = response.all_messages()
     return response.output
@@ -265,8 +317,6 @@ with gr.Blocks(title="Google AI Agent - Email Viewer", theme=gr.themes.Soft()) a
                 label="Text Input",
                 lines=2
             )
-            
-            
             
             # Send button
             send_btn = gr.Button("Send", variant="primary")
