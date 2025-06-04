@@ -54,9 +54,7 @@ google_agent=Google_agent(llms=llms, api_keys=api_keys)
 #adding planning notes to the agent
 google_agent.state.planning_notes='task manager:when the user asks for a list of tasks, you first need to get the list of tasklists and then get the list of tasks from the chosen tasklist\
     unless the node messages already contain a list of tasklists, so generate a plan that includes getting the list of tasklists and then getting the list of tasks from the chosen tasklist\
-    image search: the image search tool can only search one image at a time, so if the user asks for multiple images, you need to add tasks for each image to the plan,\
-        sometimes when multiple manager tools and actions are needed, you might need to go back to the agent node to generate a plan that includes the needed manager tools and actions'
-
+    '
 async def google_agent_tool(ctx:RunContext[Deps], query:str):
     """
             ## Purpose
