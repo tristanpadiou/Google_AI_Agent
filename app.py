@@ -9,7 +9,7 @@ from langchain_openai import ChatOpenAI
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai import Agent, BinaryContent, RunContext
-
+from composio_langgraph import Action, ComposioToolSet, App
 from pydantic_ai.messages import ModelMessage
 from dataclasses import dataclass
 from pydantic import Field
@@ -33,6 +33,7 @@ api_keys={
 llms={'pydantic_llm':GoogleModel('gemini-2.0-flash', provider=GoogleProvider(api_key=api_keys['google_api_key'])),
     'langchain_llm':ChatGoogleGenerativeAI(google_api_key=api_keys['google_api_key'], model='gemini-2.0-flash', temperature=0.3),
     'openai_llm':ChatOpenAI(model='gpt-4.1-mini', temperature=0.3)}
+toolset=ComposioToolSet(api_key=api_keys['composio_key'])
 
 
 #message history class for the demo agent
@@ -49,7 +50,7 @@ messages=Message_history(messages=[])
 #state for the demo agent
 
 #google agent class for the google agent
-google_agent=Google_agent(llms=llms, api_keys=api_keys)
+google_agent=Google_agent(llms=llms, api_keys=api_keys, toolset=toolset)
 
 #adding planning notes to the agent
 google_agent.state.planning_notes='task manager:when the user asks for a list of tasks, you first need to get the list of tasklists and then get the list of tasks from the chosen tasklist\
