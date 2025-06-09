@@ -30,7 +30,7 @@ class State:
    
     
     query: str
-    plan: List
+    plan: dict
     route:str
     #n_retries is the number of retries for a task
     n_retries:int
@@ -54,7 +54,6 @@ class Google_agent:
         # tool_shemas is a dictionary of the tool names and the actions they can perform
         self.tool_shemas={
             'Mail Manager':{tool.name:tool for tool in self.tools.get_action_schemas(apps=[App.GMAIL])},
-            'Maps Manager':{tool.name:tool for tool in self.tools.get_action_schemas(apps=[App.GOOGLE_MAPS])},
             'Tasks Manager':{tool.name:tool for tool in self.tools.get_action_schemas(apps=[App.GOOGLETASKS])},
             'Google images tool':{'search_images':'search for images'},
             'Get_current_time':{'get_current_time':'get the current time'},
@@ -67,9 +66,6 @@ class Google_agent:
             'managers':{
                 'Mail Manager':{
                     'actions':{tool.name:{'description':tool.description} for tool in self.tools.get_tools(apps=[App.GMAIL])}
-                },
-                'Maps Manager':{
-                    'actions':{tool.name:{'description':tool.description} for tool in self.tools.get_tools(apps=[App.GOOGLE_MAPS])}
                 },
                 'Tasks Manager':{
                     'actions':{tool.name:{'description':tool.description} for tool in self.tools.get_tools(apps=[App.GOOGLETASKS])}
@@ -93,7 +89,7 @@ class Google_agent:
         }
         # agents are the composio agents for the tools
         self.mail_agent=Composio_agent(self.tools.get_tools(apps=[App.GMAIL]),llms['openai_llm'])
-        self.maps_agent=Composio_agent(self.tools.get_tools(apps=[App.GOOGLE_MAPS]),llms['openai_llm'])
+        
         self.tasks_agent=Composio_agent(self.tools.get_tools(apps=[App.GOOGLETASKS]),llms['openai_llm'])
         
     
@@ -116,6 +112,8 @@ class Google_agent:
                     action: str = Field(description='the action that the manager tool must take,if all the tasks are completed return End')
                     task: str = Field(description='the task that the manager tool must complete, if all the tasks are completed return End')
                     
+                if len(ctx.state.node_messages_list)>9:
+                    del ctx.state.node_messages_list[0]
                 #generate the plan
                 plan_agent=Agent(self.llm,output_type=plan_shema, instructions=f'based on a query, and the previous node messages (if any) and the previous plan (if any), generate or modify a plan using those manager tools: {self.tool_functions} to get the necessary info and to complete the query, use the planning notes to improve the planning, if any, the plan cannot contain more than 10 tasks, if a manager returns a auth error return End')
                 try:
@@ -130,15 +128,13 @@ class Google_agent:
         # agent_node is the node that uses the plan to complete the task and update the node_query if needed
         @dataclass
         class router_node(BaseNode[State]):
-            async def run(self,ctx: GraphRunContext[State])-> get_current_time_node | maps_manager_node | tasks_manager_node | mail_manager_node | google_image_search_node | list_tools_node | planning_notes_editor_node | query_notes_editor_node | End:
+            async def run(self,ctx: GraphRunContext[State])-> get_current_time_node | tasks_manager_node | mail_manager_node | google_image_search_node | list_tools_node | planning_notes_editor_node | query_notes_editor_node | End:
                 plan= ctx.state.plan
                 
                 #get the manager tool to use
                 ctx.state.route=plan.manager_tool
                 if ctx.state.route=='Get_current_time':
                     return get_current_time_node()
-                elif ctx.state.route=='Maps Manager':
-                    return maps_manager_node()
                 elif ctx.state.route=='Tasks Manager':
                     return tasks_manager_node()
                 elif ctx.state.route=='Mail Manager':
@@ -187,11 +183,10 @@ class Google_agent:
                     else:
                         return 'no image found'
                 
-                @dataclass
-                class Images:
+                class Images(BaseModel):
                     image_url:str = Field(description='the url of the image')
                     image_title:str = Field(description='the title of the image')
-                @dataclass
+                
                 class image_url_shema(BaseModel):
                     images:List[Images] = Field(description='the list of images')
 
@@ -201,10 +196,6 @@ class Google_agent:
                 for image in response.output.images:
                     images.append({'image_title':image.image_title, 'image_url':image.image_url})
 
-                if ctx.state.node_messages_dict.get(ctx.state.plan.manager_tool):
-                    ctx.state.node_messages_dict[ctx.state.plan.manager_tool][ctx.state.plan.action]=images
-                else:
-                    ctx.state.node_messages_dict[ctx.state.plan.manager_tool]={ctx.state.plan.action:images}
                 ctx.state.node_messages_list.append({ctx.state.plan.manager_tool:{ctx.state.plan.action:images}})
                 return Agent_node()
                 
@@ -272,26 +263,6 @@ class Google_agent:
                 return Agent_node()
 
 
-        @dataclass
-        class maps_manager_node(BaseNode[State]):
-            """tool to use to answer maps and location queries
-            this tool can:
-            find locations such as restorants, bowling alleys, museums and others
-            display those locations's infos (eg. adress, name, url, price range)
-            args: query - pass the maps or loc related queries directly here
-            return: locations with urls
-            """
-            maps_agent=self.maps_agent
-            async def run(self,ctx: GraphRunContext[State])->Agent_node:
-                response=self.maps_agent.chat(ctx.state.plan.task + 'if there is an error, explain it in detail')
-                # return response
-                if ctx.state.node_messages_dict.get(ctx.state.plan.manager_tool):
-                    ctx.state.node_messages_dict[ctx.state.plan.manager_tool][ctx.state.plan.action]=response
-                else:
-                    ctx.state.node_messages_dict[ctx.state.plan.manager_tool]={ctx.state.plan.action:response}
-                ctx.state.node_messages_list.append({ctx.state.plan.manager_tool:{ctx.state.plan.action:response}})
-                return Agent_node()
-
 
 
         @dataclass
@@ -313,7 +284,7 @@ class Google_agent:
                 
                 response=self.mail_agent.chat(ctx.state.plan.task + f'if the query is about sending an email, do not send any attachements, just send the url in the body, if there is an error, explain it in detail')
                 #save the inbox in the state for future use
-                if ctx.state.plan[0].action=='GMAIL_FETCH_EMAILS':
+                if ctx.state.plan.action=='GMAIL_FETCH_EMAILS':
                     inbox=[]
                     for i in response['data']['messages']:
                         mail={'message_id':i.get('messageId'),'thread_id':i.get('threadId'),'subject':i.get('subject'),'sender':i.get('sender'),'date':i.get('messageTimestamp'),'snippet':i.get('preview'), 'messageText':i.get('messageText')}
@@ -361,7 +332,7 @@ class Google_agent:
                 ctx.state.node_messages_list.append({ctx.state.plan.manager_tool:{ctx.state.plan.action:self.tools}})
                 return Agent_node()
 
-        self.graph=Graph(nodes=[Agent_node, router_node, google_image_search_node, tasks_manager_node, maps_manager_node, mail_manager_node, get_current_time_node, list_tools_node, planning_notes_editor_node, query_notes_editor_node])
+        self.graph=Graph(nodes=[Agent_node, router_node, google_image_search_node, tasks_manager_node, mail_manager_node, get_current_time_node, list_tools_node, planning_notes_editor_node, query_notes_editor_node])
         self.state=State(node_messages_dict={}, node_messages_list=[], query='', plan=[], route='', n_retries=0, planning_notes='', query_notes={}, mail_inbox=[])
         self.Agent_node=Agent_node()
         
