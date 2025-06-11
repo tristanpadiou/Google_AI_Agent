@@ -55,6 +55,7 @@ class Google_agent:
         self.tool_shemas={
             'Mail Manager':{tool.name:tool for tool in self.tools.get_action_schemas(apps=[App.GMAIL])},
             'Tasks Manager':{tool.name:tool for tool in self.tools.get_action_schemas(apps=[App.GOOGLETASKS])},
+            'Calendar Manager':{tool.name:tool for tool in self.tools.get_action_schemas(apps=[App.GOOGLECALENDAR])},
             'Google images tool':{'search_images':'search for images'},
             'Get_current_time':{'get_current_time':'get the current time'},
             'Planning_notes_editor':{'planning_notes_editor':'notes to improve the planning or use of a tool based on a prompt'},
@@ -69,6 +70,9 @@ class Google_agent:
                 },
                 'Tasks Manager':{
                     'actions':{tool.name:{'description':tool.description} for tool in self.tools.get_tools(apps=[App.GOOGLETASKS])}
+                },
+                'Calendar Manager':{
+                    'actions':{tool.name:{'description':tool.description} for tool in self.tools.get_tools(apps=[App.GOOGLECALENDAR])}
                 },
                 'Google images tool':{
                     'actions':{'search_images':{'description':'search for images, this tool can search for multiple images at once'}}
@@ -92,7 +96,7 @@ class Google_agent:
         
         self.tasks_agent=Composio_agent(self.tools.get_tools(apps=[App.GOOGLETASKS]),llms['openai_llm'])
         
-    
+        self.calendar_agent=Composio_agent(self.tools.get_tools(apps=[App.GOOGLECALENDAR]),llms['openai_llm'])
 
         # Nodes:
         # planner_node is the node that generates the plan
@@ -119,6 +123,7 @@ class Google_agent:
                 try:
                     response=plan_agent.run_sync(f'query:{ctx.state.query}, planning_notes:{ctx.state.planning_notes}, previous_node_messages:{ctx.state.node_messages_list}, previous_plan:{ctx.state.plan if ctx.state.plan else "no previous plan"}') 
                     ctx.state.plan=response.output
+                    ctx.state.node_messages_dict['agent_node']=response.output
                     return router_node()
                 #if the plan is not generated, return the state
                 except Exception as e:
@@ -128,7 +133,7 @@ class Google_agent:
         # agent_node is the node that uses the plan to complete the task and update the node_query if needed
         @dataclass
         class router_node(BaseNode[State]):
-            async def run(self,ctx: GraphRunContext[State])-> get_current_time_node | tasks_manager_node | mail_manager_node | google_image_search_node | list_tools_node | planning_notes_editor_node | query_notes_editor_node | End:
+            async def run(self,ctx: GraphRunContext[State])-> get_current_time_node | tasks_manager_node | mail_manager_node | google_image_search_node | list_tools_node | planning_notes_editor_node | query_notes_editor_node | calendar_manager_node | End:
                 plan= ctx.state.plan
                 
                 #get the manager tool to use
@@ -147,7 +152,10 @@ class Google_agent:
                     return list_tools_node()
                 elif ctx.state.route=='Query_notes_editor':
                     return query_notes_editor_node()
+                elif ctx.state.route=='Calendar Manager':
+                    return calendar_manager_node()
                 else:
+                    ctx.state.plan={}
                     return End(ctx.state)
                     
 
@@ -237,6 +245,19 @@ class Google_agent:
                 else:
                     ctx.state.node_messages_dict[ctx.state.plan.manager_tool]={ctx.state.plan.action:{'query_notes':response.output.query_notes}}
                 ctx.state.node_messages_list.append({ctx.state.plan.manager_tool:{ctx.state.plan.action:{'query_notes':response.output.query_notes}}})
+
+                return Agent_node()
+        @dataclass
+        class calendar_manager_node(BaseNode[State]):
+            calendar_agent=self.calendar_agent
+            async def run(self,ctx: GraphRunContext[State])->Agent_node:
+                response=self.calendar_agent.chat(ctx.state.plan.task)
+                # return response
+                if ctx.state.node_messages_dict.get(ctx.state.plan.manager_tool):
+                    ctx.state.node_messages_dict[ctx.state.plan.manager_tool][ctx.state.plan.action]=response
+                else:
+                    ctx.state.node_messages_dict[ctx.state.plan.manager_tool]={ctx.state.plan.action:response}
+                ctx.state.node_messages_list.append({ctx.state.plan.manager_tool:{ctx.state.plan.action:response}})
                 return Agent_node()
 
         @dataclass
@@ -332,7 +353,7 @@ class Google_agent:
                 ctx.state.node_messages_list.append({ctx.state.plan.manager_tool:{ctx.state.plan.action:self.tools}})
                 return Agent_node()
 
-        self.graph=Graph(nodes=[Agent_node, router_node, google_image_search_node, tasks_manager_node, mail_manager_node, get_current_time_node, list_tools_node, planning_notes_editor_node, query_notes_editor_node])
+        self.graph=Graph(nodes=[Agent_node, router_node, google_image_search_node, tasks_manager_node, mail_manager_node, get_current_time_node, list_tools_node, planning_notes_editor_node, query_notes_editor_node, calendar_manager_node])
         self.state=State(node_messages_dict={}, node_messages_list=[], query='', plan=[], route='', n_retries=0, planning_notes='', query_notes={}, mail_inbox=[])
         self.Agent_node=Agent_node()
         
