@@ -140,28 +140,10 @@ async def chat(
         # Use the chat method from Google_agent
         response = google_agent.chat(query)
         
-        # Format the response for better readability
-        formatted_response = ""
-        if isinstance(response, dict):
-            if 'node_messages_list' in response and response['node_messages_list']:
-                # Extract the most recent meaningful response
-                for message in reversed(response['node_messages_list']):
-                    if isinstance(message, dict):
-                        for tool, action_data in message.items():
-                            if isinstance(action_data, dict):
-                                for action, result in action_data.items():
-                                    if result and result != "no image found":
-                                        formatted_response += f"**{tool} - {action}:**\n{result}\n\n"
-            
-            # If no meaningful response found, use the raw response
-            if not formatted_response:
-                formatted_response = str(response)
-        else:
-            formatted_response = str(response)
         
         return {
-            "response": formatted_response,
-            "raw_response": response  # Include raw response for debugging
+            "response": response
+            
         }
     
     except Exception as e:
@@ -221,8 +203,7 @@ API for interacting with Google AI Agent, including Google Workspace integration
 **Example Response:**
 ```json
 {
-    "response": "I've checked your emails and found 5 new messages. Created a task for tomorrow as requested.",
-    "raw_response": {...}
+    "response": state dict
 }
 ```
 
@@ -358,8 +339,7 @@ async def get_docs():
                     }
                 ],
                 "response": {
-                    "response": "string - The AI assistant's formatted response",
-                    "raw_response": "object - The raw response from Google Agent"
+                    "response": "dict - The AI assistant's response"
                 }
             },
             {
