@@ -29,7 +29,6 @@ Deprecated==1.2.18
 distro==1.9.0
 eval_type_backport==0.2.2
 executing==2.2.0
-fasta2a==0.2.16
 fastapi==0.115.12
 fastavro==1.11.1
 filelock==3.18.0
@@ -80,7 +79,7 @@ logfire==3.16.1
 logfire-api==3.16.1
 markdown-it-py==3.0.0
 matplotlib-inline==0.1.7
-mcp==1.9.2
+
 mdurl==0.1.2
 mistralai==1.8.1
 multidict==6.4.4
@@ -113,9 +112,9 @@ pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pycparser==2.22
 pydantic==2.11.2
-pydantic-ai==0.2.16
-pydantic-evals==0.2.16
-pydantic-graph==0.2.16
+pydantic-ai==0.2.18
+pydantic-evals==0.2.18
+pydantic-graph==0.2.18
 pydantic-settings==2.9.1
 pydantic_core==2.33.1
 Pygments==2.19.1

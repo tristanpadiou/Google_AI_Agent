@@ -132,6 +132,7 @@ class Google_agent:
                         response=plan_agent.run_sync(f'query:{ctx.state.query},eval_messages:{ctx.state.eval_messages_dict}, planning_notes:{ctx.state.planning_notes}, previous_node_messages:{ctx.state.node_messages_list}, previous_plan:{ctx.state.plan if ctx.state.plan else "no previous plan"}') 
                         ctx.state.plan=response.output
                         ctx.state.node_messages_dict['agent_node']=response.output
+                        
                         return router_node()
                     else:
                         ctx.state.node_messages_list.append({'eval_node':ctx.state.eval_messages_dict})
@@ -267,7 +268,7 @@ class Google_agent:
         class calendar_manager_node(BaseNode[State]):
             calendar_agent=self.calendar_agent
             async def run(self,ctx: GraphRunContext[State])->eval_node:
-                response=self.calendar_agent.chat(ctx.state.plan.task)
+                response=self.calendar_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task}')
                 # return response
                 if ctx.state.node_messages_dict.get(ctx.state.plan.manager_tool):
                     ctx.state.node_messages_dict[ctx.state.plan.manager_tool][ctx.state.plan.action]=response
@@ -290,7 +291,7 @@ class Google_agent:
             """
             tasks_agent=self.tasks_agent
             async def run(self,ctx: GraphRunContext[State])->eval_node:
-                response=self.tasks_agent.chat(ctx.state.plan.task+ 'if there is an error, explain it in detail')
+                response=self.tasks_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task} if there is an error, explain it in detail')
                 # return response
                 if ctx.state.node_messages_dict.get(ctx.state.plan.manager_tool):
                     ctx.state.node_messages_dict[ctx.state.plan.manager_tool][ctx.state.plan.action]=response
@@ -319,7 +320,7 @@ class Google_agent:
             mail_agent=self.mail_agent
             async def run(self,ctx: GraphRunContext[State])->eval_node:
                 
-                response=self.mail_agent.chat(ctx.state.plan.task)
+                response=self.mail_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task}')
                 #save the inbox in the state for future use
                 if ctx.state.plan.action=='GMAIL_FETCH_EMAILS':
                     try:
