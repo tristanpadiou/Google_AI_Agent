@@ -3,7 +3,7 @@ from composio_langgraph import Action, ComposioToolSet, App
 from composio_tools_agent import Composio_agent
 
 from pydantic_graph import BaseNode, End, GraphRunContext, Graph
-from pydantic_ai import Agent
+from pydantic_ai import Agent, format_as_xml
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 from langchain_openai import ChatOpenAI
@@ -48,9 +48,9 @@ class Google_agent:
     def __init__(self, api_keys:dict):
         """
         Args:
-            llm (any): The language model to use using langchain_framework
+            
             api_keys (dict): The API keys to use
-            toolset (ComposioToolSet): The toolset to use
+            
         """
         llms={'pydantic_llm':GoogleModel('gemini-2.5-flash-preview-05-20', provider=GoogleProvider(api_key=api_keys['google_api_key'])),
               
@@ -114,22 +114,22 @@ class Google_agent:
                 class task_shema(BaseModel):
                     task_status: str = Field(description='the status of the task, completed, failed, in progress')
                     task_reason: str = Field(description='the reason for the task status, if the task is failed, explain why')
-                    task: str = Field(description='the task to be passed to one of the manager tool nodes')
+                    task: str = Field(description='the task to be passed to one of the manager tool nodes, include the necessary info to complete the task')
                 
                 class plan_shema(BaseModel):
                     tasks: List[task_shema] = Field(description='the list of tasks that the agent need to complete to succesfully complete the query')
                     manager_tool: str = Field(description='the name of the manager tool to use, if all the tasks are completed return End')
                     action: str = Field(description='the action that the manager tool must take has to be one of the actions of the manager tool if the right format,if all the tasks are completed return End')
-                    task: str = Field(description='the task that the manager tool must complete, if all the tasks are completed return End')
+                    task: str = Field(description='the task that the manager tool must complete, include the necessary info to complete the task, if all the tasks are completed return End')
                     
                     
-                if len(ctx.state.node_messages_list)>9:
+                if len(ctx.state.node_messages_list)>5:
                     del ctx.state.node_messages_list[0]
                 #generate the plan
-                plan_agent=Agent(self.llm,output_type=plan_shema, instructions=f'based on a query, and the previous node messages (if any) and the previous plan (if any) and the eval messages (if any), generate or modify a plan using those manager tools: {self.tool_functions} to get the necessary info and to complete the query, use the planning notes to improve the planning, if any, the plan cannot contain more than 10 tasks, if a manager returns a auth error return End')
+                plan_agent=Agent(self.llm,output_type=plan_shema, instructions=f'based on a query, and the previous node messages (if any) and the previous plan (if any) and the eval messages (if any), generate or modify a plan using those manager tools: {format_as_xml(self.tool_functions)} to get the necessary info and to complete the query, use the planning notes to improve the planning, if any, the plan cannot contain more than 10 tasks, if a manager returns a auth error return End')
                 try:
                     if ctx.state.n_retries<3:
-                        response=plan_agent.run_sync(f'query:{ctx.state.query},eval_messages:{ctx.state.eval_messages_dict}, planning_notes:{ctx.state.planning_notes}, previous_node_messages:{ctx.state.node_messages_list}, previous_plan:{ctx.state.plan if ctx.state.plan else "no previous plan"}') 
+                        response=plan_agent.run_sync(f'query:{ctx.state.query},eval_messages:{ctx.state.eval_messages_dict}, planning_notes:{ctx.state.planning_notes}, previous_node_messages:{ctx.state.node_messages_list if ctx.state.node_messages_list else "no previous node messages"}, previous_plan:{format_as_xml(ctx.state.plan) if ctx.state.plan else "no previous plan"}') 
                         ctx.state.plan=response.output
                         ctx.state.node_messages_dict['agent_node']=response.output
                         
@@ -216,7 +216,7 @@ class Google_agent:
                     images:List[Images] = Field(description='the list of images')
 
                 agent=Agent(llms['pydantic_llm'],output_type=image_url_shema,tools=[get_image_url], instructions=f'based on the query and previous node messages, get the image urls')
-                response=agent.run_sync(f'query:{ctx.state.plan.task}, previous_node_messages:{ctx.state.node_messages_list}')
+                response=agent.run_sync(f'query:{ctx.state.plan.task}, previous_node_messages:{format_as_xml(ctx.state.node_messages_list) if ctx.state.node_messages_list else "no previous node messages"}')
                 images=[]
                 for image in response.output.images:
                     images.append({'image_title':image.image_title, 'image_url':image.image_url})
@@ -232,7 +232,7 @@ class Google_agent:
                 class planning_improve_shema(BaseModel):
                     planning_improvement: str = Field(description='the planning improvement notes')
                 agent=Agent(self.llm,output_type=planning_improve_shema, instructions=f'based on the dict of tools and the prompt, and the previous planning notes (if any), create a notes to improve the planning or use of a tool for the planner node')
-                response=agent.run_sync(f'prompt:{ctx.state.query}, tool_functions:{self.tool_functions}, previous_planning_notes:{ctx.state.planning_notes if ctx.state.planning_notes else "no previous planning notes"}')
+                response=agent.run_sync(f'prompt:{ctx.state.query}, tool_functions:{format_as_xml(self.tool_functions)}, previous_planning_notes:{ctx.state.planning_notes if ctx.state.planning_notes else "no previous planning notes"}')
                 ctx.state.planning_notes=response.output.planning_improvement
                 if ctx.state.node_messages_dict.get(ctx.state.plan.manager_tool):
                     ctx.state.node_messages_dict[ctx.state.plan.manager_tool][ctx.state.plan.action]=response.output.planning_improvement
@@ -252,7 +252,7 @@ class Google_agent:
                     action: str = Field(description='the action that the manager tool must take')
 
                 agent=Agent(self.llm,output_type=query_notes_shema, instructions=f'based on the user query, and the tools, edit the query notes to help the agent to fulfill the requirements of the user')
-                response=agent.run_sync(f'prompt:{ctx.state.query}, tool_functions:{self.tool_functions}')
+                response=agent.run_sync(f'prompt:{ctx.state.query}, tool_functions:{format_as_xml(self.tool_functions)}')
                 if ctx.state.query_notes.get(response.output.manager_tool):
                     ctx.state.query_notes[response.output.manager_tool][response.output.action]={'query_notes':response.output.query_notes}
                 else:
@@ -327,13 +327,15 @@ class Google_agent:
                         inbox=[]
                         for i in response['data']['messages']:
                             mail={'message_id':i.get('messageId'),'thread_id':i.get('threadId'),'subject':i.get('subject'),'sender':i.get('sender'),'date':i.get('messageTimestamp'),'snippet':i.get('preview'), 'messageText':i.get('messageText')}
+                            mail_preview={'message_id':i.get('messageId'),'thread_id':i.get('threadId'),'subject':i.get('subject'),'sender':i.get('sender'),'date':i.get('messageTimestamp'),'snippet':i.get('preview')}
                             inbox.append(mail)
+                            inbox.append(mail_preview)
                         ctx.state.mail_inbox=inbox
                         if ctx.state.node_messages_dict.get(ctx.state.plan.manager_tool):
                             ctx.state.node_messages_dict[ctx.state.plan.manager_tool][ctx.state.plan.action]=inbox
                         else:
                             ctx.state.node_messages_dict[ctx.state.plan.manager_tool]={ctx.state.plan.action:inbox}
-                        ctx.state.node_messages_list.append({ctx.state.plan.manager_tool:{ctx.state.plan.action:inbox}})
+                        ctx.state.node_messages_list.append({ctx.state.plan.manager_tool:{ctx.state.plan.action:mail_preview}})
                     except:
                         if ctx.state.node_messages_dict.get(ctx.state.plan.manager_tool):
                             ctx.state.node_messages_dict[ctx.state.plan.manager_tool][ctx.state.plan.action]=response
