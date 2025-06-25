@@ -1,6 +1,6 @@
 from __future__ import annotations
 from composio_langgraph import Action, ComposioToolSet, App
-from composio_tools_agent import Composio_agent
+from utils.composio_tools_agent import Composio_agent
 
 from pydantic_graph import BaseNode, End, GraphRunContext, Graph
 from pydantic_ai import Agent, format_as_xml
