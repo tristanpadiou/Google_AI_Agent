@@ -179,6 +179,8 @@ class Google_agent:
                 else:
                     ctx.state.plan={}
                     ctx.state.eval_messages_dict={}
+                    if not ctx.state.node_messages_list:
+                        ctx.state.node_messages_list.append({'error':ctx.state.plan})
                     return End(ctx.state)
                     
 
