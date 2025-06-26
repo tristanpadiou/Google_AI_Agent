@@ -277,11 +277,11 @@ class Google_agent:
             mail_agent=self.mail_agent
             async def run(self,ctx: GraphRunContext[State])->eval_node:
                 if ctx.state.plan.manager_tool=='Tasks Manager':
-                    response=self.task_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task}')
+                    response=self.task_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task}, query_notes:{ctx.state.query_notes.get(ctx.state.plan.manager_tool).get(ctx.state.plan.action) if ctx.state.query_notes.get(ctx.state.plan.manager_tool) else "no query notes"}')
                 elif ctx.state.plan.manager_tool=='Calendar Manager':
-                    response=self.calendar_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task}')
+                    response=self.calendar_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task}, query_notes:{ctx.state.query_notes.get(ctx.state.plan.manager_tool).get(ctx.state.plan.action) if ctx.state.query_notes.get(ctx.state.plan.manager_tool) else "no query notes"}')
                 elif ctx.state.plan.manager_tool=='Mail Manager':
-                    response=self.mail_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task}')
+                    response=self.mail_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task}, query_notes:{ctx.state.query_notes.get(ctx.state.plan.manager_tool).get(ctx.state.plan.action) if ctx.state.query_notes.get(ctx.state.plan.manager_tool) else "no query notes"}')
                 
                 #save the inbox in the state for future use
                 if ctx.state.plan.action=='GMAIL_FETCH_EMAILS':
