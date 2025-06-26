@@ -153,17 +153,15 @@ class Google_agent:
         # agent_node is the node that uses the plan to complete the task and update the node_query if needed
         @dataclass
         class router_node(BaseNode[State]):
-            async def run(self,ctx: GraphRunContext[State])-> get_current_time_node | tasks_manager_node | mail_manager_node | google_image_search_node | list_tools_node | planning_notes_editor_node | query_notes_editor_node | calendar_manager_node | get_mail_details_node | End:
+            async def run(self,ctx: GraphRunContext[State])-> get_current_time_node | google_tools_node | google_image_search_node | list_tools_node | planning_notes_editor_node | query_notes_editor_node | get_mail_details_node | End:
                 plan= ctx.state.plan
                 
                 #get the manager tool to use
                 ctx.state.route=plan.manager_tool
                 if ctx.state.route=='Get_current_time':
                     return get_current_time_node()
-                elif ctx.state.route=='Tasks Manager':
-                    return tasks_manager_node()
-                elif ctx.state.route=='Mail Manager':
-                    return mail_manager_node()
+                elif ctx.state.route=='Tasks Manager' or ctx.state.route=='Mail Manager' or ctx.state.route=='Calendar Manager':
+                    return google_tools_node()
                 elif ctx.state.route=='Google images tool':
                     return google_image_search_node()
                 elif ctx.state.route=='Planning_notes_editor':
@@ -172,8 +170,7 @@ class Google_agent:
                     return list_tools_node()
                 elif ctx.state.route=='Query_notes_editor':
                     return query_notes_editor_node()
-                elif ctx.state.route=='Calendar Manager':
-                    return calendar_manager_node()
+                
                 elif ctx.state.route=='Get_mail_details':
                     return get_mail_details_node()
                 else:
@@ -272,63 +269,20 @@ class Google_agent:
                 ctx.state.node_messages_list.append({ctx.state.plan.manager_tool:{ctx.state.plan.action:{'query_notes':response.output.query_notes}}})
 
                 return eval_node()
+
         @dataclass
-        class calendar_manager_node(BaseNode[State]):
+        class google_tools_node(BaseNode[State]):
+            task_agent=self.tasks_agent
             calendar_agent=self.calendar_agent
-            async def run(self,ctx: GraphRunContext[State])->eval_node:
-                response=self.calendar_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task}')
-                # return response
-                if ctx.state.node_messages_dict.get(ctx.state.plan.manager_tool):
-                    ctx.state.node_messages_dict[ctx.state.plan.manager_tool][ctx.state.plan.action]=response
-                else:
-                    ctx.state.node_messages_dict[ctx.state.plan.manager_tool]={ctx.state.plan.action:response}
-                ctx.state.node_messages_list.append({ctx.state.plan.manager_tool:{ctx.state.plan.action:response}})
-                return eval_node()
-
-        @dataclass
-        class tasks_manager_node(BaseNode[State]):
-            """use this tool to answer task related queries
-            this tool can:
-            list tasks
-            create tasks
-            get task details
-            complete a task (which also deletes it :) )
-
-            args: query - pass the entire tasks related queries directly here
-            
-            """
-            tasks_agent=self.tasks_agent
-            async def run(self,ctx: GraphRunContext[State])->eval_node:
-                response=self.tasks_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task} if there is an error, explain it in detail')
-                # return response
-                if ctx.state.node_messages_dict.get(ctx.state.plan.manager_tool):
-                    ctx.state.node_messages_dict[ctx.state.plan.manager_tool][ctx.state.plan.action]=response
-                else:
-                    ctx.state.node_messages_dict[ctx.state.plan.manager_tool]={ctx.state.plan.action:response}
-                ctx.state.node_messages_list.append({ctx.state.plan.manager_tool:{ctx.state.plan.action:response}})
-                return eval_node()
-
-
-
-
-        @dataclass
-        class mail_manager_node(BaseNode[State]):
-            """Tool to use to answer any email related queries
-            this tool can:
-            show the inbox
-            
-            create an email
-            create a draft email
-            verify the email content
-            send the email
-
-            args: query - pass the email related queries directly here
-            """
-            
             mail_agent=self.mail_agent
             async def run(self,ctx: GraphRunContext[State])->eval_node:
+                if ctx.state.plan.manager_tool=='Tasks Manager':
+                    response=self.task_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task}')
+                elif ctx.state.plan.manager_tool=='Calendar Manager':
+                    response=self.calendar_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task}')
+                elif ctx.state.plan.manager_tool=='Mail Manager':
+                    response=self.mail_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task}')
                 
-                response=self.mail_agent.chat(f'action:{ctx.state.plan.action}, task:{ctx.state.plan.task}')
                 #save the inbox in the state for future use
                 if ctx.state.plan.action=='GMAIL_FETCH_EMAILS':
                     try:
@@ -424,7 +378,7 @@ class Google_agent:
                     return Agent_node()
 
 
-        self.graph=Graph(nodes=[Agent_node, router_node, google_image_search_node, get_mail_details_node, tasks_manager_node, mail_manager_node, get_current_time_node, list_tools_node, planning_notes_editor_node, query_notes_editor_node, calendar_manager_node, eval_node])
+        self.graph=Graph(nodes=[Agent_node, router_node, google_image_search_node, get_mail_details_node, google_tools_node, get_current_time_node, list_tools_node, planning_notes_editor_node, query_notes_editor_node, eval_node])
         self.state=State(node_messages_dict={}, node_messages_list=[], eval_messages_dict={}, query='', plan=[], route='', n_retries=0, planning_notes='', query_notes={}, mail_inbox=[])
         self.Agent_node=Agent_node()
         
